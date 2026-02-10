@@ -1,6 +1,11 @@
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes.example import router as example_router
+from app.routes.clone import router as clone_router
 
 app = FastAPI(title="Backend API")
 
@@ -13,6 +18,7 @@ app.add_middleware(
 )
 
 app.include_router(example_router)
+app.include_router(clone_router)
 
 @app.get("/")
 def root():

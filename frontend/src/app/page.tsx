@@ -1,16 +1,132 @@
 "use client";
 
-import { useState, useRef, useEffect, FormEvent } from "react";
+import { useState, useRef, useEffect, FormEvent, useMemo } from "react";
+import { Highlight, themes } from "prism-react-renderer";
 
 type Phase = "idle" | "scraping" | "generating" | "deploying" | "fixing" | "done" | "error";
 
+// ── File tree types ──────────────────────────────────────────
+type TreeNode = {
+  name: string;
+  path: string;
+  children?: TreeNode[];
+};
+
+function buildTree(paths: string[]): TreeNode[] {
+  const root: TreeNode[] = [];
+
+  for (const path of paths.sort()) {
+    const parts = path.split("/");
+    let current = root;
+
+    for (let i = 0; i < parts.length; i++) {
+      const name = parts[i];
+      const fullPath = parts.slice(0, i + 1).join("/");
+      const isFile = i === parts.length - 1;
+
+      let existing = current.find((n) => n.name === name);
+      if (!existing) {
+        existing = { name, path: fullPath, ...(isFile ? {} : { children: [] }) };
+        current.push(existing);
+      }
+      if (!isFile) {
+        current = existing.children!;
+      }
+    }
+  }
+  return root;
+}
+
+function FileTreeNode({
+  node,
+  depth,
+  selectedPath,
+  onSelect,
+  defaultOpen,
+}: {
+  node: TreeNode;
+  depth: number;
+  selectedPath: string;
+  onSelect: (path: string) => void;
+  defaultOpen: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const isFolder = !!node.children;
+  const isSelected = node.path === selectedPath;
+
+  if (isFolder) {
+    return (
+      <div>
+        <button
+          onClick={() => setOpen(!open)}
+          className="flex items-center gap-1.5 w-full text-left py-0.5 hover:bg-zinc-800/50 rounded px-1 transition-colors"
+          style={{ paddingLeft: depth * 12 + 4 }}
+        >
+          <span className="text-zinc-500 text-xs w-3 text-center shrink-0">
+            {open ? "▾" : "▸"}
+          </span>
+          <svg className="w-4 h-4 shrink-0 text-zinc-500" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+          </svg>
+          <span className="text-xs text-zinc-400 truncate">{node.name}</span>
+        </button>
+        {open && node.children!.map((child) => (
+          <FileTreeNode
+            key={child.path}
+            node={child}
+            depth={depth + 1}
+            selectedPath={selectedPath}
+            onSelect={onSelect}
+            defaultOpen={defaultOpen}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  const ext = node.name.split(".").pop() || "";
+  const iconColor =
+    ext === "tsx" || ext === "ts" ? "text-blue-400" :
+    ext === "json" ? "text-yellow-400" :
+    ext === "css" ? "text-purple-400" :
+    ext === "mjs" ? "text-green-400" :
+    "text-zinc-500";
+
+  return (
+    <button
+      onClick={() => onSelect(node.path)}
+      className={`flex items-center gap-1.5 w-full text-left py-0.5 rounded px-1 transition-colors ${
+        isSelected ? "bg-zinc-800 text-white" : "hover:bg-zinc-800/50 text-zinc-400"
+      }`}
+      style={{ paddingLeft: depth * 12 + 4 + 16 }}
+    >
+      <svg className={`w-3.5 h-3.5 shrink-0 ${iconColor}`} viewBox="0 0 20 20" fill="currentColor">
+        <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
+      </svg>
+      <span className="text-xs truncate">{node.name}</span>
+    </button>
+  );
+}
+
+function getLang(path: string): string {
+  const ext = path.split(".").pop() || "";
+  const map: Record<string, string> = {
+    tsx: "tsx", ts: "typescript", js: "javascript", jsx: "jsx",
+    json: "json", css: "css", mjs: "javascript", html: "markup",
+  };
+  return map[ext] || "typescript";
+}
+
+// ── Main component ───────────────────────────────────────────
 export default function Home() {
   const [url, setUrl] = useState("");
   const [code, setCode] = useState("");
+  const [files, setFiles] = useState<Record<string, string>>({});
   const [previewUrl, setPreviewUrl] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
   const [tab, setTab] = useState<"preview" | "code">("preview");
+  const [selectedFile, setSelectedFile] = useState("src/app/page.tsx");
   const [statusMessage, setStatusMessage] = useState("");
   const [logs, setLogs] = useState<string[]>([]);
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -20,14 +136,18 @@ export default function Home() {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
 
+  const fileTree = useMemo(() => buildTree(Object.keys(files)), [files]);
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
     setCode("");
+    setFiles({});
     setPreviewUrl("");
     setStatusMessage("");
     setLogs([]);
     setPhase("scraping");
+    setSelectedFile("src/app/page.tsx");
 
     try {
       const res = await fetch("http://localhost:8000/clone", {
@@ -75,6 +195,7 @@ export default function Home() {
 
           if (payload.status === "done") {
             setCode(payload.code);
+            if (payload.files) setFiles(payload.files);
             if (payload.preview_url) setPreviewUrl(payload.preview_url);
             setPhase("done");
           } else if (payload.status) {
@@ -92,15 +213,19 @@ export default function Home() {
   function handleReset() {
     setPhase("idle");
     setCode("");
+    setFiles({});
     setPreviewUrl("");
     setError("");
     setUrl("");
     setTab("preview");
+    setSelectedFile("src/app/page.tsx");
     setStatusMessage("");
     setLogs([]);
   }
 
   const isLoading = phase === "scraping" || phase === "generating" || phase === "deploying" || phase === "fixing";
+
+  const selectedFileContent = files[selectedFile] || "";
 
   // ---------- Result view (after clone is done) ----------
   if (phase === "done" && code) {
@@ -172,24 +297,59 @@ export default function Home() {
           )
         )}
 
-        {/* Code view */}
+        {/* Code view with file tree */}
         {tab === "code" && (
-          <div className="flex-1 flex flex-col overflow-hidden bg-zinc-950">
-            <div className="flex items-center justify-between px-5 py-2 border-b border-zinc-800">
-              <span className="text-xs text-zinc-500 font-mono">page.tsx</span>
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(code);
-                }}
-                className="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors"
-              >
-                Copy
-              </button>
+          <div className="flex-1 flex overflow-hidden bg-zinc-950">
+            {/* File tree sidebar */}
+            <div className="w-60 shrink-0 border-r border-zinc-800 flex flex-col overflow-hidden">
+              <div className="px-3 py-2 border-b border-zinc-800 bg-zinc-900/50">
+                <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Files</span>
+              </div>
+              <div className="flex-1 overflow-y-auto py-1 px-1">
+                {fileTree.map((node) => (
+                  <FileTreeNode
+                    key={node.path}
+                    node={node}
+                    depth={0}
+                    selectedPath={selectedFile}
+                    onSelect={setSelectedFile}
+                    defaultOpen={true}
+                  />
+                ))}
+              </div>
             </div>
-            <div className="flex-1 overflow-auto p-5">
-              <pre className="text-sm text-zinc-300 font-mono whitespace-pre-wrap break-words leading-relaxed">
-                <code>{code}</code>
-              </pre>
+
+            {/* Code panel */}
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-2 border-b border-zinc-800">
+                <span className="text-xs text-zinc-500 font-mono">{selectedFile}</span>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(selectedFileContent);
+                  }}
+                  className="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors"
+                >
+                  Copy
+                </button>
+              </div>
+              <div className="flex-1 overflow-auto">
+                <Highlight theme={themes.nightOwl} code={selectedFileContent} language={getLang(selectedFile)}>
+                  {({ style, tokens, getLineProps, getTokenProps }) => (
+                    <pre style={{ ...style, margin: 0, padding: "1.25rem", background: "transparent" }} className="text-xs font-mono leading-relaxed">
+                      {tokens.map((line, i) => (
+                        <div key={i} {...getLineProps({ line })} className="table-row">
+                          <span className="table-cell pr-4 select-none text-right text-zinc-600 w-10">{i + 1}</span>
+                          <span className="table-cell">
+                            {line.map((token, key) => (
+                              <span key={key} {...getTokenProps({ token })} />
+                            ))}
+                          </span>
+                        </div>
+                      ))}
+                    </pre>
+                  )}
+                </Highlight>
+              </div>
             </div>
           </div>
         )}

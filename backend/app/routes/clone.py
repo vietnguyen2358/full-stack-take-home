@@ -34,6 +34,7 @@ TEMPLATE_FILES = [
     "src/lib/utils.ts",
     "src/app/layout.tsx",
     "src/app/globals.css",
+    "src/app/[...slug]/page.tsx",
     # shadcn/ui components
     "src/components/ui/button.tsx",
     "src/components/ui/card.tsx",
@@ -304,13 +305,19 @@ async def clone_website(req: CloneRequest):
                     browser = await p.chromium.launch(headless=True)
                     yield _log(f"Browser launched — viewport {VIEWPORT_WIDTH}x{VIEWPORT_HEIGHT}")
                     page = await browser.new_page(
-                        viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT}
+                        viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
+                        user_agent=(
+                            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/131.0.0.0 Safari/537.36"
+                        ),
                     )
 
                     yield _log(f"Navigating to {url_str}...")
                     await asyncio.sleep(0)
-                    await page.goto(url_str, wait_until="networkidle", timeout=30000)
-                    yield _log("Page loaded (networkidle)")
+                    await page.goto(url_str, wait_until="domcontentloaded", timeout=30000)
+                    await page.wait_for_timeout(3000)
+                    yield _log("Page loaded (domcontentloaded + 3s render wait)")
 
                     # First pass: scroll to bottom to trigger all lazy-loaded content
                     yield _log("Scrolling page to trigger lazy-loaded content...")
@@ -330,12 +337,11 @@ async def clone_website(req: CloneRequest):
 
                     # Now capture HTML after all content is loaded
                     raw_html = await page.content()
-                    yield _log(f"Raw HTML — {len(raw_html):,} chars")
 
                     # Clean HTML: strip scripts/styles/noise, preserve SVGs
                     html = _clean_html(raw_html)
                     reduction = 100 - len(html) * 100 // max(len(raw_html), 1)
-                    yield _log(f"Cleaned HTML: {len(raw_html):,} → {len(html):,} chars ({reduction}% reduction)")
+                    yield _log(f"Cleaned HTML: {len(raw_html):,} chars → {len(html):,} chars ({reduction}% reduction)")
 
                     # Extract computed styles (exact colors, fonts)
                     yield _log("Extracting computed styles...")
@@ -483,7 +489,7 @@ async def clone_website(req: CloneRequest):
                 "You MUST set the background color on your outermost wrapper div using the exact body background color from the computed styles above. "
                 "For dark-themed sites, this means the entire page must have a dark background — there should be NO white gaps or white sections "
                 "unless the original site actually has white sections. Use a single wrapper: "
-                "<div className=\"min-h-screen\" style={{ backgroundColor: '...' }}> with the exact body background color. "
+                "<div className=\"min-h-screen\" style={{ backgroundColor: '...', color: '...' }}> with the exact body background and text colors. "
                 "Every section must either inherit this background or set its own explicit background color.\n"
                 "- EXACT TEXT REPRODUCTION: You MUST copy ALL text content EXACTLY as it appears in the HTML source "
                 "and the structured content outline — "
@@ -508,12 +514,20 @@ async def clone_website(req: CloneRequest):
                 "  Use these exact URLs. Match sizing and position from the screenshots.\n"
                 "  If an image URL is not listed, check the HTML source for it.\n"
                 "  For SVG logos/icons inlined in the HTML, reproduce them as inline SVGs exactly as in the HTML.\n"
+                "- LINKS: This is a visual clone, NOT a functional website. All <a> tags must use href=\"#\" "
+                "and e.preventDefault() so clicking them does nothing. Do NOT link to external URLs or other pages. "
+                "The clone should be fully self-contained — users can interact with UI elements (dropdowns, carousels, tabs) "
+                "but should never navigate away from the page.\n"
                 "- You may use React hooks (useState, useEffect, useRef, etc.) for interactivity and animations.\n"
+                "- INTERACTIVE ELEMENTS: If the page has carousels, sliders, image rotators, tabs, accordions, "
+                "dropdown menus, or any interactive components, you MUST implement them as functional React components "
+                "with real state and transitions — not static snapshots. Use useState for slide index, useEffect with "
+                "setInterval for auto-advancing carousels, and onClick handlers for navigation arrows/dots. "
+                "Use framer-motion or CSS transitions for smooth slide animations.\n"
                 "- For animations, use framer-motion, Tailwind animate classes, or CSS transitions via className.\n"
-                "- FULL PAGE REPRODUCTION — CRITICAL: You MUST reproduce the ENTIRE page from top to bottom, "
+                "- FULL PAGE REPRODUCTION: You MUST reproduce the ENTIRE page from top to bottom, "
                 "including ALL sections visible across ALL screenshots. Do NOT stop after the hero section. "
-                f"There are {n} screenshots capturing the full page scroll — every single section from every screenshot must appear in your output. "
-                "Count the sections in the screenshots and verify your output includes all of them. "
+                f"The {n} screenshots are sequential viewport captures from top to bottom — every section must appear in your output. "
                 "The page should scroll naturally just like the original.\n"
                 "- Match colors, spacing, font sizes, and layout as closely as possible to the screenshots.\n\n"
                 f"Here is the cleaned page HTML (scripts/styles removed, SVGs preserved):\n\n{truncated_html}"
@@ -527,7 +541,7 @@ async def clone_website(req: CloneRequest):
                     "image_url": {"url": f"data:image/png;base64,{shot_b64}"},
                 })
 
-            yield _log("Sending request to claude-opus-4.5 via OpenRouter...")
+            yield _log("Sending request to claude-sonnet-4.5 via OpenRouter...")
             await asyncio.sleep(0)
 
             ai_messages = [{"role": "user", "content": content}]
@@ -575,7 +589,7 @@ async def clone_website(req: CloneRequest):
                     yield _log("Creating project directory structure...")
                     await asyncio.to_thread(
                         sandbox.process.exec,
-                        f"mkdir -p {project_dir}/src/app {project_dir}/src/lib {project_dir}/src/components/ui"
+                        f"mkdir -p {project_dir}/src/app/[...slug] {project_dir}/src/lib {project_dir}/src/components/ui"
                     )
 
                     for rel_path in TEMPLATE_FILES:
@@ -681,7 +695,21 @@ async def clone_website(req: CloneRequest):
                 yield _log(f"Deployment error: {e}")
 
             # ── DONE ──────────────────────────────────────────────
-            yield _sse_event({"status": "done", "code": generated_code, "preview_url": preview_url})
+            # Build full project file map for the code viewer
+            project_files: dict[str, str] = {}
+            for rel_path in TEMPLATE_FILES:
+                try:
+                    project_files[rel_path] = (TEMPLATE_DIR / rel_path).read_text()
+                except Exception:
+                    pass
+            project_files["src/app/page.tsx"] = generated_code
+
+            yield _sse_event({
+                "status": "done",
+                "code": generated_code,
+                "preview_url": preview_url,
+                "files": project_files,
+            })
 
         except HTTPException as e:
             yield _log(f"Error: {e.detail}")

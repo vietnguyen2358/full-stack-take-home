@@ -5,6 +5,17 @@ import { Highlight, themes } from "prism-react-renderer";
 
 type Phase = "idle" | "scraping" | "generating" | "deploying" | "fixing" | "done" | "error";
 
+type CloneRecord = {
+  id: string;
+  url: string;
+  status: string;
+  preview_url: string | null;
+  screenshot_count: number;
+  image_count: number;
+  created_at: string;
+  completed_at: string | null;
+};
+
 // ── File tree types ──────────────────────────────────────────
 type TreeNode = {
   name: string;
@@ -129,12 +140,22 @@ export default function Home() {
   const [selectedFile, setSelectedFile] = useState("src/app/page.tsx");
   const [statusMessage, setStatusMessage] = useState("");
   const [logs, setLogs] = useState<string[]>([]);
+  const [history, setHistory] = useState<CloneRecord[]>([]);
+  const [cloneId, setCloneId] = useState("");
   const logEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll activity log to bottom
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
+
+  // Fetch clone history on mount
+  useEffect(() => {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/clones`)
+      .then((r) => r.json())
+      .then((data) => { if (data.clones) setHistory(data.clones); })
+      .catch(() => {}); // silently fail if DB not configured
+  }, []);
 
   const fileTree = useMemo(() => buildTree(Object.keys(files)), [files]);
 
@@ -150,7 +171,7 @@ export default function Home() {
     setSelectedFile("src/app/page.tsx");
 
     try {
-      const res = await fetch("http://localhost:8000/clone", {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/clone`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
@@ -197,7 +218,13 @@ export default function Home() {
             setCode(payload.code);
             if (payload.files) setFiles(payload.files);
             if (payload.preview_url) setPreviewUrl(payload.preview_url);
+            if (payload.clone_id) setCloneId(payload.clone_id);
             setPhase("done");
+            // Refresh history
+            fetch(`${process.env.NEXT_PUBLIC_API_URL}/clones`)
+              .then((r) => r.json())
+              .then((data) => { if (data.clones) setHistory(data.clones); })
+              .catch(() => {});
           } else if (payload.status) {
             setPhase(payload.status);
             if (payload.message) setStatusMessage(payload.message);
@@ -221,6 +248,57 @@ export default function Home() {
     setSelectedFile("src/app/page.tsx");
     setStatusMessage("");
     setLogs([]);
+    setCloneId("");
+  }
+
+  const [redeploying, setRedeploying] = useState(false);
+  const [redeployLogs, setRedeployLogs] = useState<string[]>([]);
+
+  async function handleRedeploy() {
+    if (!cloneId) return;
+    setRedeploying(true);
+    setRedeployLogs([]);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/clones/${cloneId}/redeploy`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const payload = JSON.parse(line.slice(6));
+
+          if (payload.log) {
+            setRedeployLogs((prev) => [...prev, payload.log]);
+          }
+          if (payload.status === "done" && payload.preview_url) {
+            setPreviewUrl(payload.preview_url);
+            setTab("preview");
+          }
+          if (payload.status === "error") {
+            setRedeployLogs((prev) => [...prev, `Error: ${payload.message}`]);
+          }
+        }
+      }
+    } catch (err: unknown) {
+      setRedeployLogs((prev) => [...prev, `Error: ${err instanceof Error ? err.message : "Failed"}`]);
+    } finally {
+      setRedeploying(false);
+    }
   }
 
   const isLoading = phase === "scraping" || phase === "generating" || phase === "deploying" || phase === "fixing";
@@ -285,13 +363,49 @@ export default function Home() {
         ) : (
           tab === "preview" && (
             <div className="flex-1 flex items-center justify-center bg-zinc-950">
-              <div className="text-center">
-                <p className="text-zinc-400 text-sm">
-                  Preview requires Daytona sandbox deployment.
-                </p>
-                <p className="text-zinc-500 text-xs mt-1">
-                  Switch to the Code tab to see the generated component.
-                </p>
+              <div className="text-center space-y-4">
+                {redeploying ? (
+                  <div className="w-full max-w-2xl mx-auto flex flex-col items-center gap-6 px-4">
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="w-8 h-8 border-2 border-zinc-700 border-t-white rounded-full" style={{ animation: "spin-slow 1s linear infinite" }} />
+                      <p className="text-sm font-medium text-white">Re-deploying to sandbox...</p>
+                    </div>
+                    {redeployLogs.length > 0 && (
+                      <div className="w-full rounded-lg border border-zinc-800 bg-zinc-900/50 overflow-hidden">
+                        <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800 bg-zinc-900">
+                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          <span className="text-xs font-medium text-zinc-400">Activity</span>
+                          <span className="text-xs text-zinc-600 ml-auto">{redeployLogs.length} events</span>
+                        </div>
+                        <div className="max-h-52 overflow-y-auto p-3 space-y-0.5 text-left">
+                          {redeployLogs.map((log, i) => (
+                            <p key={i} className="text-xs font-mono leading-relaxed text-zinc-500">
+                              <span className="text-zinc-700 select-none mr-2">{String(i + 1).padStart(2, "0")}</span>
+                              {log}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-zinc-400 text-sm">
+                      Sandbox preview has expired.
+                    </p>
+                    {cloneId && (
+                      <button
+                        onClick={handleRedeploy}
+                        className="px-4 py-2 rounded-lg bg-white text-black text-sm font-semibold hover:bg-zinc-200 transition-colors"
+                      >
+                        Re-deploy to sandbox
+                      </button>
+                    )}
+                    <p className="text-zinc-500 text-xs">
+                      Or switch to the Code tab to view the source.
+                    </p>
+                  </>
+                )}
               </div>
             </div>
           )
@@ -503,6 +617,67 @@ export default function Home() {
           >
             Try again
           </button>
+        </div>
+      )}
+
+      {/* Clone History */}
+      {!isLoading && phase !== "error" && history.length > 0 && (
+        <div className="mt-12 w-full max-w-2xl">
+          <h2 className="text-sm font-medium text-zinc-500 mb-3">Recent clones</h2>
+          <div className="space-y-2">
+            {history.map((clone) => (
+              <div
+                key={clone.id}
+                className={`flex items-center gap-3 px-4 py-3 rounded-lg border border-zinc-800 bg-zinc-900/50 transition-colors group ${
+                  clone.status === "done" ? "hover:bg-zinc-900" : "opacity-60"
+                }`}
+              >
+                <button
+                  disabled={clone.status !== "done"}
+                  onClick={() => {
+                    fetch(`${process.env.NEXT_PUBLIC_API_URL}/clones/${clone.id}`)
+                      .then((r) => r.json())
+                      .then((data) => {
+                        setUrl(data.url);
+                        setCode(data.generated_code || "");
+                        setFiles(data.files || {});
+                        setPreviewUrl("");
+                        setCloneId(data.id);
+                        setTab("code");
+                        setPhase("done");
+                      })
+                      .catch(() => {});
+                  }}
+                  className={`flex items-center gap-3 flex-1 min-w-0 text-left ${
+                    clone.status === "done" ? "cursor-pointer" : "cursor-not-allowed"
+                  }`}
+                >
+                  <div className={`w-2 h-2 rounded-full shrink-0 ${
+                    clone.status === "done" ? "bg-emerald-500" :
+                    clone.status === "error" ? "bg-red-500" :
+                    "bg-yellow-500 animate-pulse"
+                  }`} />
+                  <span className="text-sm text-zinc-300 truncate flex-1">{clone.url}</span>
+                  <span className="text-xs text-zinc-600 shrink-0">
+                    {new Date(clone.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </button>
+                <button
+                  onClick={() => {
+                    fetch(`${process.env.NEXT_PUBLIC_API_URL}/clones/${clone.id}`, { method: "DELETE" })
+                      .then(() => setHistory((prev) => prev.filter((c) => c.id !== clone.id)))
+                      .catch(() => {});
+                  }}
+                  className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 transition-all shrink-0 p-1"
+                  title="Delete clone"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

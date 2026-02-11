@@ -1,8 +1,9 @@
 fastapi
 uvicorn
-sqlalchemy
 pydantic
 python-dotenv
 playwright
 httpx
 daytona
+certifi
+supabase

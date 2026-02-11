@@ -298,6 +298,95 @@ _JS_EXTRACT_NAV = """() => {
     return navs;
 }"""
 
+# JavaScript to extract carousel/slider/tab content (including hidden slides)
+_JS_EXTRACT_INTERACTIVE = """() => {
+    const results = [];
+
+    // Common carousel/slider selectors
+    const carouselSelectors = [
+        '[class*="carousel"]', '[class*="slider"]', '[class*="swiper"]',
+        '[class*="slide"]', '[data-carousel]', '[data-slider]',
+        '[role="tabpanel"]', '[class*="testimonial"]',
+        '[class*="card-stack"]', '[class*="rotating"]'
+    ];
+
+    const containers = document.querySelectorAll(carouselSelectors.join(', '));
+    const seen = new Set();
+
+    for (const container of containers) {
+        // Skip if this is a child of an already-processed carousel
+        if (seen.has(container) || [...seen].some(s => s.contains(container))) continue;
+
+        // Find all slide-like children
+        const slideSelectors = [
+            ':scope > div', ':scope > li', ':scope > article',
+            '[class*="slide"]', '[role="tabpanel"]', '[class*="item"]'
+        ];
+        let slides = [];
+        for (const sel of slideSelectors) {
+            const found = container.querySelectorAll(sel);
+            if (found.length > 1) { slides = [...found]; break; }
+        }
+        if (slides.length < 2) continue;
+
+        seen.add(container);
+        const carousel = {
+            type: container.className.includes('tab') ? 'tabs' : 'carousel',
+            selector: container.className.split(' ').filter(c => c.length > 2).slice(0, 3).join('.'),
+            slideCount: slides.length,
+            slides: []
+        };
+
+        for (const slide of slides.slice(0, 20)) {
+            const slideData = {};
+            // Get heading
+            const h = slide.querySelector('h1, h2, h3, h4, h5, h6');
+            if (h) slideData.title = h.textContent?.trim().substring(0, 200);
+            // Get description
+            const p = slide.querySelector('p');
+            if (p) slideData.description = p.textContent?.trim().substring(0, 300);
+            // Get image
+            const img = slide.querySelector('img');
+            if (img) { slideData.image = img.src; slideData.alt = img.alt; }
+            // Get link text
+            const a = slide.querySelector('a');
+            if (a) slideData.linkText = a.textContent?.trim().substring(0, 100);
+            // Get any remaining visible text
+            if (!slideData.title && !slideData.description) {
+                slideData.text = slide.textContent?.trim().substring(0, 300);
+            }
+            if (Object.keys(slideData).length > 0) carousel.slides.push(slideData);
+        }
+
+        if (carousel.slides.length >= 2) results.push(carousel);
+    }
+
+    // Also find tab groups
+    const tabLists = document.querySelectorAll('[role="tablist"]');
+    for (const tabList of tabLists) {
+        const tabs = tabList.querySelectorAll('[role="tab"]');
+        if (tabs.length < 2) continue;
+        const tabGroup = { type: 'tabs', slideCount: tabs.length, slides: [] };
+        for (const tab of tabs) {
+            const panelId = tab.getAttribute('aria-controls');
+            const panel = panelId ? document.getElementById(panelId) : null;
+            const tabData = { title: tab.textContent?.trim() };
+            if (panel) {
+                const ph = panel.querySelector('h1, h2, h3, h4, h5, h6');
+                if (ph) tabData.panelTitle = ph.textContent?.trim().substring(0, 200);
+                const pp = panel.querySelector('p');
+                if (pp) tabData.panelDescription = pp.textContent?.trim().substring(0, 300);
+                const pi = panel.querySelector('img');
+                if (pi) { tabData.image = pi.src; tabData.alt = pi.alt; }
+            }
+            tabGroup.slides.push(tabData);
+        }
+        results.push(tabGroup);
+    }
+
+    return results;
+}"""
+
 
 async def _call_ai(client: httpx.AsyncClient, messages: list[dict], api_key: str) -> str:
     """Send messages to OpenRouter and return the assistant's response content."""
@@ -454,6 +543,13 @@ async def clone_website(req: CloneRequest):
                     logger.info("[scrape] Navigation: %d nav(s), %d dropdown items", len(nav_structure), total_dropdown_items)
                     yield _log(f"Found {len(nav_structure)} nav(s) with {total_dropdown_items} dropdown items")
 
+                    # Extract carousel/slider/tab content (including hidden slides)
+                    yield _log("Extracting interactive elements (carousels, sliders, tabs)...")
+                    interactive_elements: list[dict] = await page.evaluate(_JS_EXTRACT_INTERACTIVE)
+                    total_slides = sum(el.get("slideCount", 0) for el in interactive_elements)
+                    logger.info("[scrape] Interactive elements: %d groups, %d total slides", len(interactive_elements), total_slides)
+                    yield _log(f"Found {len(interactive_elements)} interactive element(s) with {total_slides} total slides/tabs")
+
                     yield _log("Extracting image URLs...")
                     await asyncio.sleep(0)
                     image_urls: list[str] = await page.evaluate("""(maxUrls) => {
@@ -579,6 +675,35 @@ async def clone_website(req: CloneRequest):
                             nav_lines.append(f"    [{label}]")
                 nav_section = "\n".join(nav_lines)
 
+            # Format interactive elements for the prompt
+            interactive_section = ""
+            if interactive_elements:
+                int_lines = []
+                for i, el in enumerate(interactive_elements):
+                    el_type = el.get("type", "carousel")
+                    slide_count = el.get("slideCount", 0)
+                    int_lines.append(f"  {el_type.upper()} #{i + 1} ({slide_count} items):")
+                    for j, slide in enumerate(el.get("slides", [])):
+                        parts = []
+                        if slide.get("title"):
+                            parts.append(f'title="{slide["title"]}"')
+                        if slide.get("description"):
+                            parts.append(f'desc="{slide["description"][:150]}"')
+                        if slide.get("text"):
+                            parts.append(f'text="{slide["text"][:150]}"')
+                        if slide.get("image"):
+                            parts.append(f'img={slide["image"]}')
+                        if slide.get("alt"):
+                            parts.append(f'alt="{slide["alt"]}"')
+                        if slide.get("linkText"):
+                            parts.append(f'link="{slide["linkText"]}"')
+                        if slide.get("panelTitle"):
+                            parts.append(f'panelTitle="{slide["panelTitle"]}"')
+                        if slide.get("panelDescription"):
+                            parts.append(f'panelDesc="{slide["panelDescription"][:150]}"')
+                        int_lines.append(f"    Slide {j + 1}: {', '.join(parts)}")
+                interactive_section = "\n".join(int_lines)
+
             prompt = (
                 "You are a pixel-perfect website cloning expert. Your goal is to produce a 1:1 visual replica.\n"
                 "Given the HTML source, computed styles, a content outline, "
@@ -610,6 +735,8 @@ async def clone_website(req: CloneRequest):
                 f"{content_outline}\n\n"
                 "NAVIGATION STRUCTURE (menus with their dropdown items — implement ALL of these as functional dropdowns):\n"
                 f"{nav_section if nav_section else '  (no dropdowns detected)'}\n\n"
+                "INTERACTIVE ELEMENTS DATA (carousels, sliders, tabs — ALL slides/items extracted, including hidden ones):\n"
+                f"{interactive_section if interactive_section else '  (none detected)'}\n\n"
                 "Rules:\n"
                 "- OUTPUT FORMAT: You may output multiple files using '// FILE: <path>' markers.\n"
                 "  At minimum output src/app/page.tsx. Break large pages into components for structure:\n"
@@ -662,11 +789,14 @@ async def clone_website(req: CloneRequest):
                 "MUST be implemented as a working dropdown. Use useState to track which dropdown is open, toggle on click, "
                 "and show/hide the dropdown panel with all the listed sub-items. Style the dropdown as an absolute-positioned "
                 "panel below the trigger. Close dropdowns when clicking outside (useEffect with document click listener).\n"
-                "- INTERACTIVE ELEMENTS: Carousels, sliders, image rotators, tabs, accordions, "
-                "dropdown menus, and any interactive components MUST be functional React components "
-                "with real state and transitions — not static snapshots. Use useState for slide index, useEffect with "
-                "setInterval for auto-advancing carousels, and onClick handlers for navigation arrows/dots. "
-                "Use framer-motion or CSS transitions for smooth animations.\n"
+                "- INTERACTIVE ELEMENTS: Check the INTERACTIVE ELEMENTS DATA section above. "
+                "Carousels, sliders, image rotators, tabs, accordions, and any interactive components "
+                "MUST be functional React components with real state and transitions — not static snapshots. "
+                "The extracted data includes ALL slides/items (including hidden ones not visible in screenshots). "
+                "You MUST include EVERY slide/tab from the extracted data — not just the one visible in the screenshot. "
+                "Use useState for slide index, useEffect with setInterval for auto-advancing carousels, "
+                "onClick handlers for navigation arrows/dots, and framer-motion AnimatePresence for slide transitions. "
+                "Each carousel/slider must show prev/next controls and indicator dots matching the original design.\n"
                 "- For animations, use framer-motion, CSS transitions, or CSS keyframe animations.\n"
                 "- FULL PAGE — EVERY SECTION: You MUST reproduce the ENTIRE page from top to bottom. "
                 f"There are {n} screenshots showing the full page. Go through each screenshot one by one and make sure "

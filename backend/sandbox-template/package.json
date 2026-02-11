@@ -16,6 +16,7 @@
     "tailwind-merge": "^2.6.0",
     "tw-animate-css": "^1.2.5",
     "lucide-react": "^0.469.0",
+    "framer-motion": "^11.15.0",
     "@radix-ui/react-slot": "^1.1.1",
     "@radix-ui/react-separator": "^1.1.1",
     "@radix-ui/react-avatar": "^1.1.2",

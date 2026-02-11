@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-MAX_HTML_CHARS = 100_000
+MAX_HTML_CHARS = 200_000
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent.parent / "sandbox-template"
 
 # Files to upload from the template (relative to TEMPLATE_DIR)
@@ -51,6 +51,16 @@ TEMPLATE_FILES = [
     "src/components/ui/skeleton.tsx",
     "src/components/ui/progress.tsx",
     "src/components/ui/alert.tsx",
+    # Aceternity-style animated components
+    "src/components/ui/background-gradient.tsx",
+    "src/components/ui/bento-grid.tsx",
+    "src/components/ui/card-hover-effect.tsx",
+    "src/components/ui/hover-border-gradient.tsx",
+    "src/components/ui/infinite-moving-cards.tsx",
+    "src/components/ui/lamp.tsx",
+    "src/components/ui/moving-border.tsx",
+    "src/components/ui/spotlight.tsx",
+    "src/components/ui/text-generate-effect.tsx",
 ]
 
 
@@ -60,7 +70,9 @@ class CloneRequest(BaseModel):
 
 VIEWPORT_WIDTH = 1280
 VIEWPORT_HEIGHT = 900
-MAX_SCREENSHOTS = 8  # cap to avoid massive payloads
+MAX_SCREENSHOTS = 15  # increased for long pages
+MAX_IMAGE_URLS = 100
+MAX_STRUCTURED_ELEMENTS = 300
 MAX_BUILD_ATTEMPTS = 3
 
 
@@ -87,6 +99,157 @@ def _extract_shadcn_components(code: str) -> list[str]:
     """Parse generated code to find which shadcn/ui components are actually imported."""
     pattern = r'from\s+["\']@/components/ui/([^"\']+)["\']'
     return list(set(re.findall(pattern, code)))
+
+
+def _clean_html(html: str) -> str:
+    """Strip noise from HTML while preserving SVGs for logo/icon fidelity.
+
+    1. Extract all <svg>...</svg> blocks and replace with placeholders.
+    2. Remove <script>, <style>, <noscript> tags and their contents.
+    3. Remove HTML comments.
+    4. Remove data-* and event handler attributes.
+    5. Simplify inline styles (keep only layout-critical properties).
+    6. Collapse excessive whitespace.
+    7. Restore SVGs (but truncate absurdly long path data).
+    """
+    # 1. Extract SVGs
+    svgs: list[str] = []
+
+    def _stash_svg(m: re.Match) -> str:
+        svg = m.group(0)
+        # Truncate very long SVG path data (>500 chars per path)
+        svg = re.sub(
+            r'(\s+d="[^"]{500})[^"]*"',
+            r'\1..."',
+            svg,
+        )
+        idx = len(svgs)
+        svgs.append(svg)
+        return f"<!--SVG_PLACEHOLDER_{idx}-->"
+
+    cleaned = re.sub(r"<svg[\s\S]*?</svg>", _stash_svg, html, flags=re.IGNORECASE)
+
+    # 2. Remove <script>, <style>, <noscript> with content
+    for tag in ("script", "style", "noscript"):
+        cleaned = re.sub(
+            rf"<{tag}[\s\S]*?</{tag}>", "", cleaned, flags=re.IGNORECASE
+        )
+
+    # 3. Remove HTML comments (but not our SVG placeholders)
+    cleaned = re.sub(r"<!--(?!SVG_PLACEHOLDER_)\s*[\s\S]*?-->", "", cleaned)
+
+    # 4. Remove data-* and event handler attributes
+    cleaned = re.sub(r'\s+data-[\w-]+="[^"]*"', "", cleaned)
+    cleaned = re.sub(r"\s+data-[\w-]+=\'[^']*\'", "", cleaned)
+    cleaned = re.sub(r'\s+on\w+="[^"]*"', "", cleaned)
+
+    # 5. Remove non-essential attributes (aria-*, role is sometimes useful but verbose)
+    cleaned = re.sub(r'\s+aria-[\w-]+="[^"]*"', "", cleaned)
+
+    # 6. Collapse whitespace
+    cleaned = re.sub(r"\n\s*\n+", "\n", cleaned)
+    cleaned = re.sub(r"  +", " ", cleaned)
+
+    # 7. Restore SVGs
+    for i, svg in enumerate(svgs):
+        cleaned = cleaned.replace(f"<!--SVG_PLACEHOLDER_{i}-->", svg)
+
+    return cleaned.strip()
+
+
+# JavaScript to extract computed styles from the page
+_JS_EXTRACT_STYLES = """() => {
+    const result = {};
+
+    // CSS custom properties from :root
+    const rootStyles = getComputedStyle(document.documentElement);
+    const customProps = {};
+    for (const sheet of document.styleSheets) {
+        try {
+            for (const rule of sheet.cssRules) {
+                if (rule.selectorText === ':root' || rule.selectorText === ':root, :host') {
+                    for (let i = 0; i < rule.style.length; i++) {
+                        const prop = rule.style[i];
+                        if (prop.startsWith('--')) {
+                            customProps[prop] = rule.style.getPropertyValue(prop).trim();
+                        }
+                    }
+                }
+            }
+        } catch(e) {} // cross-origin sheets
+    }
+    result.cssVariables = customProps;
+
+    // Font families from prominent elements
+    const fonts = new Set();
+    for (const sel of ['body', 'h1', 'h2', 'h3', 'p', 'a', 'button', 'nav']) {
+        const el = document.querySelector(sel);
+        if (el) fonts.add(getComputedStyle(el).fontFamily);
+    }
+    result.fonts = [...fonts];
+
+    // Key colors
+    const body = document.body;
+    const bodyStyle = getComputedStyle(body);
+    result.bodyBg = bodyStyle.backgroundColor;
+    result.bodyColor = bodyStyle.color;
+
+    // Nav/header colors
+    const header = document.querySelector('header, nav, [role="banner"]');
+    if (header) {
+        const hs = getComputedStyle(header);
+        result.headerBg = hs.backgroundColor;
+        result.headerColor = hs.color;
+    }
+
+    // Footer colors
+    const footer = document.querySelector('footer, [role="contentinfo"]');
+    if (footer) {
+        const fs = getComputedStyle(footer);
+        result.footerBg = fs.backgroundColor;
+        result.footerColor = fs.color;
+    }
+
+    // Primary button colors (first button with a bg)
+    const btns = document.querySelectorAll('button, a.btn, [role="button"]');
+    for (const btn of btns) {
+        const bs = getComputedStyle(btn);
+        if (bs.backgroundColor && bs.backgroundColor !== 'rgba(0, 0, 0, 0)') {
+            result.primaryBtnBg = bs.backgroundColor;
+            result.primaryBtnColor = bs.color;
+            break;
+        }
+    }
+
+    return result;
+}"""
+
+# JavaScript to extract structured content in DOM order
+_JS_EXTRACT_CONTENT = """(maxElements) => {
+    const items = [];
+    const selectors = 'h1, h2, h3, h4, h5, h6, p, a, button, label, img, li, span.hero, [role="heading"]';
+    const elements = document.querySelectorAll(selectors);
+
+    for (const el of elements) {
+        if (items.length >= maxElements) break;
+        const tag = el.tagName.toLowerCase();
+        const text = el.textContent?.trim().substring(0, 200);
+        if (!text && tag !== 'img') continue;
+
+        const item = { tag };
+        if (tag === 'img') {
+            item.src = el.src || '';
+            item.alt = el.alt || '';
+        } else if (tag === 'a') {
+            item.text = text;
+            item.href = el.href || '';
+        } else {
+            item.text = text;
+        }
+        items.push(item);
+    }
+    return items;
+}"""
 
 
 async def _call_ai(client: httpx.AsyncClient, messages: list[dict], api_key: str) -> str:
@@ -166,12 +329,30 @@ async def clone_website(req: CloneRequest):
                     yield _log("Lazy-load scroll complete")
 
                     # Now capture HTML after all content is loaded
-                    html = await page.content()
-                    yield _log(f"Extracted HTML — {len(html):,} chars")
+                    raw_html = await page.content()
+                    yield _log(f"Raw HTML — {len(raw_html):,} chars")
+
+                    # Clean HTML: strip scripts/styles/noise, preserve SVGs
+                    html = _clean_html(raw_html)
+                    reduction = 100 - len(html) * 100 // max(len(raw_html), 1)
+                    yield _log(f"Cleaned HTML: {len(raw_html):,} → {len(html):,} chars ({reduction}% reduction)")
+
+                    # Extract computed styles (exact colors, fonts)
+                    yield _log("Extracting computed styles...")
+                    await asyncio.sleep(0)
+                    computed_styles: dict = await page.evaluate(_JS_EXTRACT_STYLES)
+                    yield _log(f"Got styles — {len(computed_styles.get('fonts', []))} font families, {len(computed_styles.get('cssVariables', {}))} CSS vars")
+
+                    # Extract structured content (DOM-order outline)
+                    yield _log("Extracting structured content...")
+                    structured_content: list[dict] = await page.evaluate(
+                        _JS_EXTRACT_CONTENT, MAX_STRUCTURED_ELEMENTS
+                    )
+                    yield _log(f"Extracted {len(structured_content)} content elements")
 
                     yield _log("Extracting image URLs...")
                     await asyncio.sleep(0)
-                    image_urls: list[str] = await page.evaluate("""() => {
+                    image_urls: list[str] = await page.evaluate("""(maxUrls) => {
                         const urls = new Set();
                         document.querySelectorAll('img[src]').forEach(img => {
                             if (img.src) urls.add(img.src);
@@ -190,8 +371,8 @@ async def clone_website(req: CloneRequest):
                         document.querySelectorAll('link[rel*="icon"][href]').forEach(link => {
                             if (link.href) urls.add(link.href);
                         });
-                        return [...urls].slice(0, 50);
-                    }""")
+                        return [...urls].slice(0, maxUrls);
+                    }""", MAX_IMAGE_URLS)
                     yield _log(f"Found {len(image_urls)} image/asset URLs")
 
                     total_height = await page.evaluate("document.body.scrollHeight")
@@ -226,33 +407,99 @@ async def clone_website(req: CloneRequest):
             image_list = "\n".join(f"  - {u}" for u in image_urls) if image_urls else "  (none found)"
             n = len(screenshots)
 
+            # Format computed styles for the prompt
+            styles_section = ""
+            if computed_styles:
+                style_lines = []
+                if computed_styles.get("fonts"):
+                    style_lines.append(f"Font families: {', '.join(computed_styles['fonts'])}")
+                if computed_styles.get("bodyBg"):
+                    style_lines.append(f"Body background: {computed_styles['bodyBg']}")
+                if computed_styles.get("bodyColor"):
+                    style_lines.append(f"Body text color: {computed_styles['bodyColor']}")
+                if computed_styles.get("headerBg"):
+                    style_lines.append(f"Header background: {computed_styles['headerBg']}")
+                if computed_styles.get("headerColor"):
+                    style_lines.append(f"Header text color: {computed_styles['headerColor']}")
+                if computed_styles.get("footerBg"):
+                    style_lines.append(f"Footer background: {computed_styles['footerBg']}")
+                if computed_styles.get("footerColor"):
+                    style_lines.append(f"Footer text color: {computed_styles['footerColor']}")
+                if computed_styles.get("primaryBtnBg"):
+                    style_lines.append(f"Primary button background: {computed_styles['primaryBtnBg']}")
+                if computed_styles.get("primaryBtnColor"):
+                    style_lines.append(f"Primary button text: {computed_styles['primaryBtnColor']}")
+                css_vars = computed_styles.get("cssVariables", {})
+                if css_vars:
+                    # Include up to 30 most useful CSS variables
+                    var_lines = [f"  {k}: {v}" for k, v in list(css_vars.items())[:30]]
+                    style_lines.append("CSS custom properties:\n" + "\n".join(var_lines))
+                styles_section = "\n".join(style_lines)
+
+            # Format structured content for the prompt
+            content_outline = ""
+            if structured_content:
+                outline_lines = []
+                for item in structured_content:
+                    tag = item.get("tag", "")
+                    text = item.get("text", "")
+                    if tag == "img":
+                        outline_lines.append(f"  [{tag}] src={item.get('src', '')} alt=\"{item.get('alt', '')}\"")
+                    elif tag == "a":
+                        outline_lines.append(f"  [{tag}] \"{text}\" href={item.get('href', '')}")
+                    else:
+                        outline_lines.append(f"  [{tag}] \"{text}\"")
+                content_outline = "\n".join(outline_lines)
+
             prompt = (
-                "You are a website cloning expert. Given the HTML source and a series of screenshots capturing "
-                f"the ENTIRE page (scrolled top to bottom in {n} viewport-sized chunks), "
+                "You are a website cloning expert. Given the HTML source, computed styles, a content outline, "
+                f"and a series of screenshots capturing the ENTIRE page (scrolled top to bottom in {n} viewport-sized chunks), "
                 "generate a Next.js page component (page.tsx) that visually replicates the ENTIRE page.\n\n"
                 "Tech stack available in the project:\n"
                 "- React 19 with Next.js 16 App Router\n"
                 "- Tailwind CSS for all styling\n"
                 "- shadcn/ui components — import from \"@/components/ui/<name>\"\n"
-                "  Available after setup: button, card, badge, avatar, separator, accordion, tabs,\n"
+                "  Available: button, card, badge, avatar, separator, accordion, tabs,\n"
                 "  input, textarea, navigation-menu, sheet, dialog, dropdown-menu, popover,\n"
                 "  tooltip, select, checkbox, radio-group, switch, slider, progress,\n"
                 "  alert, alert-dialog, aspect-ratio, collapsible, scroll-area, skeleton, table, toggle, toggle-group\n"
+                "- Animated UI components — import from \"@/components/ui/<name>\"\n"
+                "  Available: background-gradient, bento-grid, card-hover-effect, hover-border-gradient,\n"
+                "  infinite-moving-cards, lamp, moving-border, spotlight, text-generate-effect\n"
                 "- lucide-react icons — import { IconName } from \"lucide-react\"\n"
+                "- framer-motion — import { motion } from \"framer-motion\" for animations\n"
                 "- Utility: import { cn } from \"@/lib/utils\"\n\n"
+                "EXACT COMPUTED STYLES (use these exact values, do NOT guess from screenshots):\n"
+                f"{styles_section}\n\n"
+                "STRUCTURED CONTENT OUTLINE (elements in DOM order — use for exact text and ordering):\n"
+                f"{content_outline}\n\n"
                 "Rules:\n"
                 "- Output ONLY the raw TSX code for page.tsx. No markdown fences, no explanation.\n"
                 '- The file MUST start with "use client" and export a default function component.\n'
                 "- CRITICAL: The code must be valid TypeScript/JSX with no syntax errors. "
                 "Ensure all brackets, braces, and parentheses are properly closed. "
                 "Test mentally that the component compiles before outputting.\n"
-                "- EXACT TEXT REPRODUCTION: You MUST copy ALL text content EXACTLY as it appears in the HTML source — "
+                "- BACKGROUND COLOR — THIS IS CRITICAL: The project has NO default background color. "
+                "You MUST set the background color on your outermost wrapper div using the exact body background color from the computed styles above. "
+                "For dark-themed sites, this means the entire page must have a dark background — there should be NO white gaps or white sections "
+                "unless the original site actually has white sections. Use a single wrapper: "
+                "<div className=\"min-h-screen\" style={{ backgroundColor: '...' }}> with the exact body background color. "
+                "Every section must either inherit this background or set its own explicit background color.\n"
+                "- EXACT TEXT REPRODUCTION: You MUST copy ALL text content EXACTLY as it appears in the HTML source "
+                "and the structured content outline — "
                 "company names, brand names, headings, paragraphs, button labels, nav links, footer text, etc. "
                 "NEVER substitute, rename, or invent company names or branding. "
-                "Read the text from the HTML and use it verbatim.\n"
+                "Read the text from the HTML/outline and use it verbatim.\n"
+                "- CONTENT ORDER: Follow the structured content outline above for the correct ordering of elements. "
+                "This outline shows the exact DOM order of headings, paragraphs, links, buttons, and images.\n"
                 "- LOGOS & BRANDING: Reproduce logos exactly. Use the original image URL for logo images. "
                 "For inline SVG logos in the HTML, copy the SVG paths exactly — do NOT replace them with generic icons. "
                 "The clone must look like the SAME company's website, not a different one.\n"
+                "- COLORS: Use the exact computed color values provided above (body, header, footer, button colors). "
+                "Convert RGB values to Tailwind arbitrary values like bg-[rgb(255,255,255)] or use the closest Tailwind class. "
+                "Text colors must also match — use the computed foreground colors, not defaults.\n"
+                "- FONTS: Use the exact font families from the computed styles. "
+                "For Google Fonts, add a <link> tag via useEffect. Use Tailwind font-[family] arbitrary values.\n"
                 "- Use Tailwind CSS utility classes for layout, spacing, colors, typography.\n"
                 "- Use shadcn/ui components where they match the original UI (buttons, cards, nav menus, dialogs, badges, etc.).\n"
                 "- Use lucide-react for icons that match the original site (for decorative icons only, NOT for logos).\n"
@@ -261,14 +508,15 @@ async def clone_website(req: CloneRequest):
                 "  Use these exact URLs. Match sizing and position from the screenshots.\n"
                 "  If an image URL is not listed, check the HTML source for it.\n"
                 "  For SVG logos/icons inlined in the HTML, reproduce them as inline SVGs exactly as in the HTML.\n"
-                "- FONTS: Use Tailwind font utilities. For specific Google Fonts, add a <link> tag via useEffect or next/head.\n"
                 "- You may use React hooks (useState, useEffect, useRef, etc.) for interactivity and animations.\n"
-                "- For animations, use Tailwind animate classes (animate-pulse, animate-bounce, etc.) or CSS transitions via className.\n"
-                "- IMPORTANT: Reproduce the ENTIRE page from top to bottom, including ALL sections visible across ALL screenshots. "
-                f"The {n} screenshots are sequential viewport captures from top to bottom — every section must appear in your output. "
+                "- For animations, use framer-motion, Tailwind animate classes, or CSS transitions via className.\n"
+                "- FULL PAGE REPRODUCTION — CRITICAL: You MUST reproduce the ENTIRE page from top to bottom, "
+                "including ALL sections visible across ALL screenshots. Do NOT stop after the hero section. "
+                f"There are {n} screenshots capturing the full page scroll — every single section from every screenshot must appear in your output. "
+                "Count the sections in the screenshots and verify your output includes all of them. "
                 "The page should scroll naturally just like the original.\n"
                 "- Match colors, spacing, font sizes, and layout as closely as possible to the screenshots.\n\n"
-                f"Here is the page HTML (may be truncated):\n\n{truncated_html}"
+                f"Here is the cleaned page HTML (scripts/styles removed, SVGs preserved):\n\n{truncated_html}"
             )
 
             content: list[dict] = [{"type": "text", "text": prompt}]

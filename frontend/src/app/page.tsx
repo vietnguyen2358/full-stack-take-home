@@ -149,15 +149,16 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Preview */}
-        {tab === "preview" && (
-          previewUrl ? (
-            <iframe
-              src={previewUrl}
-              className="flex-1 w-full border-none bg-white"
-              title="Cloned website"
-            />
-          ) : (
+        {/* Preview — always mounted to preserve Daytona auth handshake */}
+        {previewUrl ? (
+          <iframe
+            src={previewUrl}
+            sandbox="allow-scripts allow-same-origin"
+            className={`flex-1 w-full border-none bg-white ${tab !== "preview" ? "hidden" : ""}`}
+            title="Cloned website"
+          />
+        ) : (
+          tab === "preview" && (
             <div className="flex-1 flex items-center justify-center bg-zinc-950">
               <div className="text-center">
                 <p className="text-zinc-400 text-sm">

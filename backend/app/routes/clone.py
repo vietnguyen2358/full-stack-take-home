@@ -40,33 +40,6 @@ TEMPLATE_FILES = [
     "src/app/layout.tsx",
     "src/app/globals.css",
     "src/app/[...slug]/page.tsx",
-    # shadcn/ui components
-    "src/components/ui/button.tsx",
-    "src/components/ui/card.tsx",
-    "src/components/ui/badge.tsx",
-    "src/components/ui/separator.tsx",
-    "src/components/ui/input.tsx",
-    "src/components/ui/textarea.tsx",
-    "src/components/ui/avatar.tsx",
-    "src/components/ui/tabs.tsx",
-    "src/components/ui/accordion.tsx",
-    "src/components/ui/scroll-area.tsx",
-    "src/components/ui/dialog.tsx",
-    "src/components/ui/dropdown-menu.tsx",
-    "src/components/ui/navigation-menu.tsx",
-    "src/components/ui/skeleton.tsx",
-    "src/components/ui/progress.tsx",
-    "src/components/ui/alert.tsx",
-    # Aceternity-style animated components
-    "src/components/ui/background-gradient.tsx",
-    "src/components/ui/bento-grid.tsx",
-    "src/components/ui/card-hover-effect.tsx",
-    "src/components/ui/hover-border-gradient.tsx",
-    "src/components/ui/infinite-moving-cards.tsx",
-    "src/components/ui/lamp.tsx",
-    "src/components/ui/moving-border.tsx",
-    "src/components/ui/spotlight.tsx",
-    "src/components/ui/text-generate-effect.tsx",
 ]
 
 
@@ -92,19 +65,43 @@ def strip_markdown_fences(text: str) -> str:
     if text.endswith("```"):
         text = text[:-3].rstrip()
     # Strip any preamble text before the actual code.
-    # The generated file must start with "use client" or an import statement.
-    for marker in ['"use client"', "'use client'", "import "]:
-        idx = text.find(marker)
-        if idx != -1:
-            text = text[idx:]
-            break
+    # Look for // FILE: marker first (multi-file output)
+    file_marker_idx = text.find("// FILE:")
+    if file_marker_idx != -1:
+        text = text[file_marker_idx:]
+    else:
+        # Single-file: must start with "use client" or an import statement.
+        for marker in ['"use client"', "'use client'", "import "]:
+            idx = text.find(marker)
+            if idx != -1:
+                text = text[idx:]
+                break
     return text.strip()
 
 
-def _extract_shadcn_components(code: str) -> list[str]:
-    """Parse generated code to find which shadcn/ui components are actually imported."""
-    pattern = r'from\s+["\']@/components/ui/([^"\']+)["\']'
-    return list(set(re.findall(pattern, code)))
+def parse_multi_file_output(raw: str) -> dict[str, str]:
+    """Split AI output on '// FILE: <path>' markers into {path: content}.
+
+    If no markers found, treat entire output as src/app/page.tsx (backward compat).
+    """
+    if "// FILE:" not in raw:
+        return {"src/app/page.tsx": raw}
+
+    files: dict[str, str] = {}
+    parts = raw.split("// FILE:")
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        newline_idx = part.find("\n")
+        if newline_idx == -1:
+            continue
+        path = part[:newline_idx].strip()
+        content = part[newline_idx + 1:].strip()
+        if path and content:
+            files[path] = content
+    return files
+
 
 
 def _clean_html(html: str) -> str:
@@ -313,7 +310,7 @@ async def _call_ai(client: httpx.AsyncClient, messages: list[dict], api_key: str
         json={
             "model": "anthropic/claude-sonnet-4.5",
             "messages": messages,
-            "max_tokens": 32000,
+            "max_tokens": 64000,
         },
     )
     resp.raise_for_status()
@@ -583,23 +580,30 @@ async def clone_website(req: CloneRequest):
                 nav_section = "\n".join(nav_lines)
 
             prompt = (
-                "You are a website cloning expert. Given the HTML source, computed styles, a content outline, "
-                f"and a series of screenshots capturing the ENTIRE page (scrolled top to bottom in {n} viewport-sized chunks), "
-                "generate a Next.js page component (page.tsx) that visually replicates the ENTIRE page.\n\n"
-                "Tech stack available in the project:\n"
+                "You are a pixel-perfect website cloning expert. Your goal is to produce a 1:1 visual replica.\n"
+                "Given the HTML source, computed styles, a content outline, "
+                f"and {n} sequential screenshots capturing the ENTIRE page (scrolled top to bottom), "
+                "generate a Next.js page component (page.tsx) that is visually IDENTICAL to the original.\n\n"
+                "CRITICAL — SCREENSHOT FIDELITY:\n"
+                "The screenshots are your PRIMARY reference. Study EVERY screenshot carefully.\n"
+                "- Each screenshot shows a viewport-sized slice of the page from top to bottom.\n"
+                "- You MUST reproduce EVERY section visible in EVERY screenshot. Count the screenshots and verify\n"
+                "  your output covers all of them. If there are 13 screenshots, your page must have 13 screenshots\n"
+                "  worth of content — do NOT summarize or skip sections.\n"
+                "- Match the EXACT layout: grid columns, flex directions, spacing, padding, margins, border-radius.\n"
+                "- Match EXACT font sizes, font weights, letter-spacing, line-height from what you see.\n"
+                "- Match EXACT colors — backgrounds, text, borders, gradients, shadows.\n"
+                "- Reproduce decorative elements: gradient overlays, glows, blurs, grid patterns, dot patterns.\n"
+                "- Your output will be LONG. That is expected and correct. Do not try to be concise.\n\n"
+                "Tech stack pre-installed in the project:\n"
                 "- React 19 with Next.js 16 App Router\n"
-                "- Tailwind CSS for all styling\n"
-                "- shadcn/ui components — import from \"@/components/ui/<name>\"\n"
-                "  Available: button, card, badge, avatar, separator, accordion, tabs,\n"
-                "  input, textarea, navigation-menu, sheet, dialog, dropdown-menu, popover,\n"
-                "  tooltip, select, checkbox, radio-group, switch, slider, progress,\n"
-                "  alert, alert-dialog, aspect-ratio, collapsible, scroll-area, skeleton, table, toggle, toggle-group\n"
-                "- Animated UI components — import from \"@/components/ui/<name>\"\n"
-                "  Available: background-gradient, bento-grid, card-hover-effect, hover-border-gradient,\n"
-                "  infinite-moving-cards, lamp, moving-border, spotlight, text-generate-effect\n"
+                "- Tailwind CSS (available for styling)\n"
                 "- lucide-react icons — import { IconName } from \"lucide-react\"\n"
-                "- framer-motion — import { motion } from \"framer-motion\" for animations\n"
-                "- Utility: import { cn } from \"@/lib/utils\"\n\n"
+                "- framer-motion — import { motion, AnimatePresence } from \"framer-motion\" for animations\n"
+                "- Utility: import { cn } from \"@/lib/utils\" (className merge helper)\n"
+                "- No pre-built UI component library is installed, but you can import and use ANY npm package\n"
+                "  (e.g. @radix-ui, @headlessui, react-icons, @mui/material, chakra-ui, etc.) — npm install runs before build.\n"
+                "  You may also use Tailwind classes, inline styles, CSS modules, or any combination.\n\n"
                 "EXACT COMPUTED STYLES (use these exact values, do NOT guess from screenshots):\n"
                 f"{styles_section}\n\n"
                 "STRUCTURED CONTENT OUTLINE (elements in DOM order — use for exact text and ordering):\n"
@@ -607,8 +611,18 @@ async def clone_website(req: CloneRequest):
                 "NAVIGATION STRUCTURE (menus with their dropdown items — implement ALL of these as functional dropdowns):\n"
                 f"{nav_section if nav_section else '  (no dropdowns detected)'}\n\n"
                 "Rules:\n"
-                "- Output ONLY the raw TSX code for page.tsx. No markdown fences, no explanation.\n"
-                '- The file MUST start with "use client" and export a default function component.\n'
+                "- OUTPUT FORMAT: You may output multiple files using '// FILE: <path>' markers.\n"
+                "  At minimum output src/app/page.tsx. Break large pages into components for structure:\n"
+                "  // FILE: src/app/page.tsx\n"
+                "  \"use client\";\n"
+                "  import { Navbar } from \"@/components/navbar\";\n"
+                "  ...\n"
+                "  // FILE: src/components/navbar.tsx\n"
+                "  ...\n"
+                "  Extract navbar, footer, and major repeated sections into separate component files.\n"
+                "  Import custom components from \"@/components/<name>\" (maps to src/components/<name>.tsx).\n"
+                "  No markdown fences, no explanation — just the raw code.\n"
+                '- page.tsx MUST start with "use client" and export a default function component.\n'
                 "- CRITICAL: The code must be valid TypeScript/JSX with no syntax errors. "
                 "Ensure all brackets, braces, and parentheses are properly closed. "
                 "Test mentally that the component compiles before outputting.\n"
@@ -629,12 +643,10 @@ async def clone_website(req: CloneRequest):
                 "For inline SVG logos in the HTML, copy the SVG paths exactly — do NOT replace them with generic icons. "
                 "The clone must look like the SAME company's website, not a different one.\n"
                 "- COLORS: Use the exact computed color values provided above (body, header, footer, button colors). "
-                "Convert RGB values to Tailwind arbitrary values like bg-[rgb(255,255,255)] or use the closest Tailwind class. "
+                "Apply these exact color values using Tailwind arbitrary values (e.g. bg-[rgb(255,255,255)]), inline styles, or CSS variables. "
                 "Text colors must also match — use the computed foreground colors, not defaults.\n"
                 "- FONTS: Use the exact font families from the computed styles. "
-                "For Google Fonts, add a <link> tag via useEffect. Use Tailwind font-[family] arbitrary values.\n"
-                "- Use Tailwind CSS utility classes for layout, spacing, colors, typography.\n"
-                "- Use shadcn/ui components where they match the original UI (buttons, cards, nav menus, dialogs, badges, etc.).\n"
+                "For Google Fonts, add a <link> tag via useEffect.\n"
                 "- Use lucide-react for icons that match the original site (for decorative icons only, NOT for logos).\n"
                 "- IMAGES: Use the original image URLs with regular <img> tags (NOT next/image). Here are the image URLs extracted:\n"
                 f"{image_list}\n"
@@ -655,12 +667,18 @@ async def clone_website(req: CloneRequest):
                 "with real state and transitions — not static snapshots. Use useState for slide index, useEffect with "
                 "setInterval for auto-advancing carousels, and onClick handlers for navigation arrows/dots. "
                 "Use framer-motion or CSS transitions for smooth animations.\n"
-                "- For animations, use framer-motion, Tailwind animate classes, or CSS transitions via className.\n"
-                "- FULL PAGE REPRODUCTION: You MUST reproduce the ENTIRE page from top to bottom, "
-                "including ALL sections visible across ALL screenshots. Do NOT stop after the hero section. "
-                f"The {n} screenshots are sequential viewport captures from top to bottom — every section must appear in your output. "
-                "The page should scroll naturally just like the original.\n"
-                "- Match colors, spacing, font sizes, and layout as closely as possible to the screenshots.\n\n"
+                "- For animations, use framer-motion, CSS transitions, or CSS keyframe animations.\n"
+                "- FULL PAGE — EVERY SECTION: You MUST reproduce the ENTIRE page from top to bottom. "
+                f"There are {n} screenshots showing the full page. Go through each screenshot one by one and make sure "
+                "every visible section is in your output. Typical sections include: navbar, hero, features, "
+                "use cases, testimonials/logos, pricing, CTA, footer. Do NOT stop early or skip any section.\n"
+                "- PIXEL-PERFECT STYLING: Match exact spacing (padding, margin, gap), exact font sizes and weights, "
+                "exact border-radius values, exact colors (backgrounds, text, borders, gradients). "
+                "Use inline styles for precise values when Tailwind classes aren't exact enough.\n"
+                "- GRADIENTS & DECORATIVE EFFECTS: Reproduce all gradient backgrounds, glow effects, "
+                "backdrop-blur, box-shadows, text-gradients, and decorative patterns visible in the screenshots.\n"
+                "- LENGTH: Your output should be LONG — typically 500-1500+ lines for a full landing page. "
+                "If your output is under 300 lines, you are almost certainly skipping sections.\n\n"
                 f"Here is the cleaned page HTML (scripts/styles removed, SVGs preserved):\n\n{truncated_html}"
             )
 
@@ -680,7 +698,7 @@ async def clone_website(req: CloneRequest):
             ai_messages = [{"role": "user", "content": content}]
 
             ai_start = time.time()
-            async with httpx.AsyncClient(timeout=120) as client:
+            async with httpx.AsyncClient(timeout=300) as client:
                 try:
                     raw_response = await _call_ai(client, ai_messages, api_key)
                 except httpx.HTTPStatusError as e:
@@ -699,16 +717,11 @@ async def clone_website(req: CloneRequest):
                     raise HTTPException(status_code=502, detail="Unexpected OpenRouter response format")
 
             ai_elapsed = time.time() - ai_start
-            generated_code = strip_markdown_fences(raw_response)
-            logger.info("[generate] AI responded in %.1fs — %d chars raw, %d chars after stripping fences", ai_elapsed, len(raw_response), len(generated_code))
-            yield _log(f"AI generated {len(generated_code):,} chars of React code")
-
-            components = _extract_shadcn_components(generated_code)
-            if components:
-                logger.info("[generate] shadcn components used: %s", ", ".join(sorted(components)))
-                yield _log(f"shadcn components used: {', '.join(sorted(components))}")
-            else:
-                yield _log("No shadcn component imports detected")
+            cleaned_response = strip_markdown_fences(raw_response)
+            generated_files = parse_multi_file_output(cleaned_response)
+            generated_code = generated_files.get("src/app/page.tsx", "")
+            logger.info("[generate] AI responded in %.1fs — %d files generated (%s)", ai_elapsed, len(generated_files), ", ".join(generated_files.keys()))
+            yield _log(f"AI generated {len(generated_files)} file(s): {', '.join(generated_files.keys())}")
 
             gen_elapsed = time.time() - gen_start
             logger.info("[generate] COMPLETE in %.1fs (AI call: %.1fs)", gen_elapsed, ai_elapsed)
@@ -734,10 +747,17 @@ async def clone_website(req: CloneRequest):
 
                     # Upload files
                     yield _status("deploying", "Uploading project files...")
+                    # Compute all directories needed
+                    all_dirs = {"src/app/[...slug]", "src/lib"}
+                    for gen_path in generated_files:
+                        parent = str(Path(gen_path).parent)
+                        if parent and parent != ".":
+                            all_dirs.add(parent)
+                    mkdir_cmd = " ".join(f"{project_dir}/{d}" for d in sorted(all_dirs))
                     yield _log("Creating project directory structure...")
                     await asyncio.to_thread(
                         sandbox.process.exec,
-                        f"mkdir -p {project_dir}/src/app/[...slug] {project_dir}/src/lib {project_dir}/src/components/ui"
+                        f"mkdir -p {mkdir_cmd}"
                     )
 
                     upload_start = time.time()
@@ -750,13 +770,15 @@ async def clone_website(req: CloneRequest):
                             f"{project_dir}/{rel_path}",
                         )
 
-                    yield _log("  Uploading src/app/page.tsx (generated)")
-                    await asyncio.to_thread(
-                        sandbox.fs.upload_file,
-                        generated_code.encode("utf-8"),
-                        f"{project_dir}/src/app/page.tsx",
-                    )
-                    logger.info("[deploy] Uploaded %d template files + page.tsx in %.1fs", len(TEMPLATE_FILES), time.time() - upload_start)
+                    # Upload all AI-generated files
+                    for gen_path, gen_content in generated_files.items():
+                        yield _log(f"  Uploading {gen_path} (generated)")
+                        await asyncio.to_thread(
+                            sandbox.fs.upload_file,
+                            gen_content.encode("utf-8"),
+                            f"{project_dir}/{gen_path}",
+                        )
+                    logger.info("[deploy] Uploaded %d template + %d generated files in %.1fs", len(TEMPLATE_FILES), len(generated_files), time.time() - upload_start)
 
                     # npm install
                     yield _status("deploying", "Installing dependencies...")
@@ -777,14 +799,15 @@ async def clone_website(req: CloneRequest):
                         yield _log(f"Running next build (attempt {attempt}/{MAX_BUILD_ATTEMPTS})...")
                         await asyncio.sleep(0)
 
-                        # Upload latest code before each build attempt
+                        # Re-upload all generated files before each retry
                         if attempt > 1:
-                            yield _log("  Re-uploading fixed page.tsx...")
-                            await asyncio.to_thread(
-                                sandbox.fs.upload_file,
-                                generated_code.encode("utf-8"),
-                                f"{project_dir}/src/app/page.tsx",
-                            )
+                            yield _log("  Re-uploading fixed files...")
+                            for gen_path, gen_content in generated_files.items():
+                                await asyncio.to_thread(
+                                    sandbox.fs.upload_file,
+                                    gen_content.encode("utf-8"),
+                                    f"{project_dir}/{gen_path}",
+                                )
 
                         build_start = time.time()
                         build_result = await asyncio.to_thread(
@@ -811,24 +834,27 @@ async def clone_website(req: CloneRequest):
                             yield _log(f"Sending build errors to AI for fix (attempt {attempt + 1}/{MAX_BUILD_ATTEMPTS})...")
                             await asyncio.sleep(0)
 
+                            multi_file_context = "\n\n".join(f"// FILE: {p}\n{c}" for p, c in generated_files.items())
                             fix_messages = [
                                 {"role": "user", "content": content},
-                                {"role": "assistant", "content": generated_code},
+                                {"role": "assistant", "content": multi_file_context},
                                 {"role": "user", "content": (
                                     "The code above failed to build with Next.js. Here is the build error output:\n\n"
                                     f"```\n{error_text}\n```\n\n"
-                                    "Please fix the code and output ONLY the corrected page.tsx file. "
-                                    "No markdown fences, no explanation — just the raw TSX code."
+                                    "Please fix the code and output ALL files using // FILE: <path> markers. "
+                                    "No markdown fences, no explanation — just the raw code."
                                 )},
                             ]
 
                             try:
                                 fix_start = time.time()
-                                async with httpx.AsyncClient(timeout=120) as fix_client:
+                                async with httpx.AsyncClient(timeout=300) as fix_client:
                                     fix_response = await _call_ai(fix_client, fix_messages, api_key)
-                                generated_code = strip_markdown_fences(fix_response)
-                                logger.info("[deploy] AI fix attempt %d returned %d chars in %.1fs", attempt + 1, len(generated_code), time.time() - fix_start)
-                                yield _log(f"AI returned fixed code ({len(generated_code):,} chars)")
+                                cleaned_fix = strip_markdown_fences(fix_response)
+                                generated_files = parse_multi_file_output(cleaned_fix)
+                                generated_code = generated_files.get("src/app/page.tsx", "")
+                                logger.info("[deploy] AI fix attempt %d returned %d files in %.1fs", attempt + 1, len(generated_files), time.time() - fix_start)
+                                yield _log(f"AI returned fixed code ({len(generated_files)} file(s))")
                             except Exception as fix_err:
                                 logger.error("[deploy] AI fix request failed: %s", fix_err)
                                 yield _log(f"AI fix request failed: {fix_err}")
@@ -864,7 +890,8 @@ async def clone_website(req: CloneRequest):
                     project_files[rel_path] = (TEMPLATE_DIR / rel_path).read_text()
                 except Exception:
                     pass
-            project_files["src/app/page.tsx"] = generated_code
+            for gen_path, gen_content in generated_files.items():
+                project_files[gen_path] = gen_content
 
             total_elapsed = time.time() - request_start
             logger.info(
@@ -998,7 +1025,7 @@ async def redeploy_clone(clone_id: str):
             yield _status("deploying", "Uploading project files...")
             await asyncio.to_thread(
                 sandbox.process.exec,
-                f"mkdir -p {project_dir}/src/app/[...slug] {project_dir}/src/lib {project_dir}/src/components/ui"
+                f"mkdir -p {project_dir}/src/app/[...slug] {project_dir}/src/lib"
             )
 
             upload_start = time.time()

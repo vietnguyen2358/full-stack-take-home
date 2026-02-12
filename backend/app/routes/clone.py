@@ -19,7 +19,7 @@ from pydantic import BaseModel, HttpUrl
 
 from app.database import get_supabase
 from app.services.scraper import scrape_page, VIEWPORT_WIDTH, VIEWPORT_HEIGHT
-from app.services.ai import generate_clone, fix_build_errors, strip_markdown_fences, parse_multi_file_output
+from app.services.ai import generate_clone, fix_build_errors
 from app.services.deployer import (
     deploy_to_sandbox,
     build_with_retry,
@@ -159,17 +159,77 @@ async def clone_website(req: CloneRequest):
             yield _log("Sending request to claude-sonnet-4.5 via OpenRouter...")
             await asyncio.sleep(0)
 
+            # Queue for bridging AI on_status callbacks to SSE events
+            ai_status_queue: asyncio.Queue = asyncio.Queue()
+
+            async def on_ai_status(payload: dict):
+                await ai_status_queue.put(payload)
+
+            # Extract fields the new AI interface expects
+            font_data = scrape_data.get("font_data", {}) or {}
+            font_links = font_data.get("googleFontLinks", [])
+            scroll_positions = scrape_data.get("scroll_positions", [])
+            total_height = scrape_data.get("total_height", 0)
+            interactive_elements = scrape_data.get("interactive_elements", [])
+
             try:
-                generated_files, extra_deps, content = await generate_clone(scrape_data, api_key)
+                gen_task = asyncio.create_task(generate_clone(
+                    html=html,
+                    screenshots=screenshots,
+                    image_urls=image_urls,
+                    url=url_str,
+                    styles=computed_styles,
+                    font_links=font_links,
+                    interactives=interactive_elements,
+                    scroll_positions=scroll_positions,
+                    total_height=total_height,
+                    on_status=on_ai_status,
+                ))
+
+                # Poll for AI status updates and yield as SSE events
+                while not gen_task.done():
+                    try:
+                        payload = await asyncio.wait_for(ai_status_queue.get(), timeout=0.5)
+                        if payload.get("type") == "file_write":
+                            yield _log(f"+ {payload['file']} ({payload.get('lines', '?')} lines)")
+                        elif payload.get("status"):
+                            yield _status(payload["status"], payload["message"])
+                    except asyncio.TimeoutError:
+                        pass
+
+                # Drain remaining status events
+                while not ai_status_queue.empty():
+                    payload = ai_status_queue.get_nowait()
+                    if payload.get("type") == "file_write":
+                        yield _log(f"+ {payload['file']} ({payload.get('lines', '?')} lines)")
+                    elif payload.get("status"):
+                        yield _status(payload["status"], payload["message"])
+
+                result = gen_task.result()
             except Exception as e:
                 logger.error("[generate] AI call failed: %s", e)
                 sandbox_task.cancel()
                 raise HTTPException(status_code=502, detail=f"AI generation failed: {e}")
 
+            # Convert new list format to dict with src/ prefix for deployer
+            generated_files: dict[str, str] = {}
+            for f in result.get("files", []):
+                path = f["path"]
+                # AI generates paths like "app/page.tsx", "components/Navbar.tsx"
+                # Deployer expects "src/app/page.tsx", "src/components/Navbar.tsx"
+                if not path.startswith("src/"):
+                    path = f"src/{path}"
+                generated_files[path] = f["content"]
+            extra_deps = result.get("deps", [])
+
             generated_code = generated_files.get("src/app/page.tsx", "")
             yield _log(f"AI generated {len(generated_files)} file(s): {', '.join(generated_files.keys())}")
             if extra_deps:
                 yield _log(f"AI requested extra packages: {', '.join(extra_deps)}")
+
+            usage = result.get("usage", {})
+            if usage.get("total_cost"):
+                yield _log(f"AI cost: ${usage['total_cost']:.4f} ({usage.get('api_calls', 1)} API call(s), {usage.get('agents', 1)} agent(s))")
 
             gen_elapsed = time.time() - gen_start
             logger.info("[generate] COMPLETE in %.1fs", gen_elapsed)
@@ -201,7 +261,7 @@ async def clone_website(req: CloneRequest):
                     await asyncio.sleep(0)
 
                     build_ok, generated_files, extra_deps = await build_with_retry(
-                        sandbox, project_dir, generated_files, content, extra_deps,
+                        sandbox, project_dir, generated_files, [], extra_deps,
                         api_key, on_log=_log, on_status=_status,
                     )
                     generated_code = generated_files.get("src/app/page.tsx", "")

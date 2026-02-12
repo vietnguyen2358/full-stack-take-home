@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from daytona import CreateSandboxFromImageParams, Daytona, DaytonaConfig
 
-from app.services.ai import fix_build_errors, strip_markdown_fences, parse_multi_file_output
+from app.services.ai import fix_build_errors
 
 logger = logging.getLogger(__name__)
 

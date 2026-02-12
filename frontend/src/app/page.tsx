@@ -211,12 +211,17 @@ export default function Home() {
   const [logs, setLogs] = useState<string[]>([]);
   const [history, setHistory] = useState<CloneRecord[]>([]);
   const [cloneId, setCloneId] = useState("");
+  const [staticHtml, setStaticHtml] = useState("");
   const logEndRef = useRef<HTMLDivElement>(null);
+  const [showLogs, setShowLogs] = useState(true);
+  const [elapsed, setElapsed] = useState(0);
+  const phaseStartRef = useRef<number>(Date.now());
 
   // Auto-scroll activity log to bottom
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
+
 
   // Fetch clone history on mount
   useEffect(() => {
@@ -262,6 +267,47 @@ export default function Home() {
       const decoder = new TextDecoder();
       let buffer = "";
 
+      function processSSELine(line: string) {
+        if (!line.startsWith("data: ")) return;
+        const payload = JSON.parse(line.slice(6));
+
+        // Log events
+        if (payload.log) {
+          setLogs((prev) => [...prev, payload.log]);
+        }
+
+        if (payload.status === "error") {
+          throw new Error(payload.message || "Something went wrong");
+        }
+
+        if (payload.status === "done") {
+          const receivedFiles = payload.files || {};
+          // Use payload.code, or fall back to page.tsx from files
+          const pageCode = payload.code || receivedFiles["src/app/page.tsx"] || "";
+          setCode(pageCode);
+          setFiles(receivedFiles);
+          if (payload.preview_url) setPreviewUrl(payload.preview_url);
+          if (payload.clone_id) setCloneId(payload.clone_id);
+          if (payload.static_html) setStaticHtml(payload.static_html);
+          setPhase("done");
+          // Refresh history
+          fetch(`${process.env.NEXT_PUBLIC_API_URL}/clones`)
+            .then((r) => r.json())
+            .then((data) => { if (data.clones) setHistory(data.clones); })
+            .catch(() => {});
+        } else if (payload.status) {
+          if (payload.message) {
+            setLogs((prev) => [...prev, `▸ ${payload.message}`]);
+          }
+          setPhase(payload.status);
+          if (payload.message) setStatusMessage(payload.message);
+        }
+
+        if (payload.type === "file_write") {
+          setLogs((prev) => [...prev, `  + ${payload.file} (${payload.lines} lines)`]);
+        }
+      }
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -271,40 +317,16 @@ export default function Home() {
         buffer = lines.pop() || "";
 
         for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const payload = JSON.parse(line.slice(6));
+          processSSELine(line);
+        }
+      }
 
-          // Log events
-          if (payload.log) {
-            setLogs((prev) => [...prev, payload.log]);
-          }
-
-          if (payload.status === "error") {
-            throw new Error(payload.message || "Something went wrong");
-          }
-
-          if (payload.status === "done") {
-            setCode(payload.code);
-            if (payload.files) setFiles(payload.files);
-            if (payload.preview_url) setPreviewUrl(payload.preview_url);
-            if (payload.clone_id) setCloneId(payload.clone_id);
-            setPhase("done");
-            // Refresh history
-            fetch(`${process.env.NEXT_PUBLIC_API_URL}/clones`)
-              .then((r) => r.json())
-              .then((data) => { if (data.clones) setHistory(data.clones); })
-              .catch(() => {});
-          } else if (payload.status) {
-            if (payload.message) {
-              setLogs((prev) => [...prev, `▸ ${payload.message}`]);
-            }
-            setPhase(payload.status);
-            if (payload.message) setStatusMessage(payload.message);
-          }
-
-          if (payload.type === "file_write") {
-            setLogs((prev) => [...prev, `  + ${payload.file} (${payload.lines} lines)`]);
-          }
+      // Flush remaining buffer — the "done" event may still be here
+      // if the stream closed before the trailing newline arrived
+      buffer += decoder.decode(); // flush decoder
+      if (buffer.trim()) {
+        for (const line of buffer.split("\n")) {
+          processSSELine(line);
         }
       }
     } catch (err: unknown) {
@@ -325,6 +347,8 @@ export default function Home() {
     setStatusMessage("");
     setLogs([]);
     setCloneId("");
+    setStaticHtml("");
+    setShowLogs(true);
   }
 
   const [redeploying, setRedeploying] = useState(false);
@@ -379,170 +403,290 @@ export default function Home() {
 
   const isLoading = phase === "scraping" || phase === "generating" || phase === "deploying" || phase === "fixing";
 
-  const selectedFileContent = files[selectedFile] || "";
+  // Running elapsed timer during loading phases
+  useEffect(() => {
+    if (!isLoading) {
+      setElapsed(0);
+      return;
+    }
+    phaseStartRef.current = Date.now();
+    setElapsed(0);
+    const interval = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - phaseStartRef.current) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isLoading]);
+
+  // If selected file doesn't exist in files, fall back to first available TSX file
+  const effectiveSelectedFile = files[selectedFile]
+    ? selectedFile
+    : Object.keys(files).find((f) => f.endsWith("page.tsx")) || Object.keys(files)[0] || selectedFile;
+  const selectedFileContent = files[effectiveSelectedFile] || "";
 
   // ────────── Result view (Done state) ──────────
-  if (phase === "done" && code) {
+  if (phase === "done" && (code || Object.keys(files).length > 0)) {
     return (
-      <div className="flex flex-col h-screen bg-surface-0">
-        {/* Top bar */}
-        <div className="flex items-center gap-3 px-5 py-3 border-b border-neutral-800 bg-surface-0">
-          <button
-            onClick={handleReset}
-            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
-          >
-            <svg width="24" height="24" viewBox="0 0 173 173" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect width="172.339" height="172.339" rx="10" fill="black"/>
-              <rect x="79" y="36" width="20" height="7.5" rx="0.96" fill="#FFFEFE"/>
-              <rect x="72" y="49" width="20" height="7.5" rx="0.96" fill="#FFFEFE"/>
-              <rect x="65" y="63" width="33" height="7.5" rx="0.96" fill="#FFFEFE"/>
-              <rect x="59" y="76" width="19" height="7.5" rx="0.96" fill="#FFFEFE"/>
-              <rect x="51" y="90" width="60" height="7.5" rx="0.96" fill="#FFFEFE"/>
-              <rect x="45" y="104" width="20" height="7.5" rx="0.96" fill="#FFFEFE"/>
-              <rect x="110" y="104" width="18" height="7.5" rx="0.96" fill="#FFFEFE"/>
-              <rect x="40" y="118" width="20" height="7.5" rx="0.96" fill="#FFFEFE"/>
-              <rect x="115" y="118" width="21" height="7.5" rx="0.96" fill="#FFFEFE"/>
-              <rect x="23" y="131" width="45" height="7.5" rx="0.96" fill="#FFFEFE"/>
-              <rect x="109" y="131" width="40" height="7.5" rx="0.96" fill="#FFFEFE"/>
-            </svg>
-            <span className="text-sm font-serif font-semibold tracking-tight text-neutral-50">Clone</span>
-          </button>
-          <div className="h-4 w-px bg-neutral-700" />
-
-          {/* Preview / Code toggle */}
-          <div className="flex rounded-md bg-surface-1 p-0.5">
-            <button
-              onClick={() => setTab("preview")}
-              className={`text-xs font-mono uppercase tracking-wider px-3 py-1 rounded transition-colors ${
-                tab === "preview"
-                  ? "bg-accent text-surface-0"
-                  : "text-neutral-400 hover:text-neutral-200"
-              }`}
-            >
-              Preview
-            </button>
-            <button
-              onClick={() => setTab("code")}
-              className={`text-xs font-mono uppercase tracking-wider px-3 py-1 rounded transition-colors ${
-                tab === "code"
-                  ? "bg-accent text-surface-0"
-                  : "text-neutral-400 hover:text-neutral-200"
-              }`}
-            >
-              Code
-            </button>
-          </div>
-
-          <span className="text-sm text-neutral-500 font-mono truncate flex-1">{url}</span>
-          <button
-            onClick={handleReset}
-            className="text-xs font-mono uppercase tracking-wider px-3 py-1.5 rounded-md border border-neutral-700 text-neutral-400 hover:border-accent hover:text-accent transition-colors"
-          >
-            Clone another
-          </button>
-        </div>
-
-        {/* Preview — always mounted to preserve Daytona auth handshake */}
-        {previewUrl ? (
-          <iframe
-            src={previewUrl}
-            sandbox="allow-scripts allow-same-origin"
-            className={`flex-1 w-full border-none bg-white ${tab !== "preview" ? "hidden" : ""}`}
-            title="Cloned website"
-          />
-        ) : (
-          tab === "preview" && (
-            <div className="flex-1 flex items-center justify-center bg-surface-0">
-              <div className="text-center space-y-4">
-                {redeploying ? (
-                  <div className="w-full max-w-2xl mx-auto flex flex-col items-center gap-6 px-4">
-                    <div className="flex flex-col items-center gap-3">
-                      <ArcSpinner />
-                      <p className="text-sm font-mono text-neutral-50">Re-deploying to sandbox...</p>
-                    </div>
-                    {redeployLogs.length > 0 && (
-                      <TerminalLog logs={redeployLogs} />
-                    )}
-                  </div>
-                ) : (
-                  <>
-                    <p className="text-neutral-400 text-sm font-mono">
-                      Sandbox preview has expired.
-                    </p>
-                    {cloneId && (
-                      <button
-                        onClick={handleRedeploy}
-                        className="px-4 py-2 rounded-lg bg-accent text-surface-0 text-sm font-mono font-semibold hover:brightness-110 transition-all"
-                      >
-                        Re-deploy to sandbox
-                      </button>
-                    )}
-                    <p className="text-neutral-500 text-xs font-mono">
-                      Or switch to the Code tab to view the source.
-                    </p>
-                  </>
-                )}
+      <div className="flex h-screen bg-surface-0">
+        {/* Left Panel — Build Log */}
+        {showLogs && logs.length > 0 && (
+          <div className="w-80 shrink-0 flex flex-col border-r border-neutral-800/80 bg-surface-0">
+            {/* Panel header */}
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-neutral-800 bg-surface-1/80">
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]" />
+                  <div className="w-2 h-2 rounded-full bg-neutral-700" />
+                  <div className="w-2 h-2 rounded-full bg-neutral-700" />
+                </div>
+                <span className="text-[10px] font-mono uppercase tracking-widest text-neutral-500 ml-1">Build Log</span>
               </div>
-            </div>
-          )
-        )}
-
-        {/* Code view with file tree */}
-        {tab === "code" && (
-          <div className="flex-1 flex overflow-hidden bg-surface-0">
-            {/* File tree sidebar */}
-            <div className="w-60 shrink-0 border-r border-neutral-800 flex flex-col overflow-hidden">
-              <div className="px-3 py-2 border-b border-neutral-800 bg-surface-1/50">
-                <span className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">Files</span>
-              </div>
-              <div className="flex-1 overflow-y-auto py-1 px-1">
-                {fileTree.map((node) => (
-                  <FileTreeNode
-                    key={node.path}
-                    node={node}
-                    depth={0}
-                    selectedPath={selectedFile}
-                    onSelect={setSelectedFile}
-                    defaultOpen={true}
-                  />
-                ))}
-              </div>
-            </div>
-
-            {/* Code panel */}
-            <div className="flex-1 flex flex-col overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-2 border-b border-neutral-800">
-                <span className="text-xs text-neutral-500 font-mono">{selectedFile}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-neutral-600">{logs.length} events</span>
                 <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(selectedFileContent);
-                  }}
-                  className="text-xs font-mono px-2 py-1 rounded bg-surface-2 text-neutral-400 hover:text-accent hover:bg-surface-3 transition-colors"
+                  onClick={() => setShowLogs(false)}
+                  className="p-1 rounded hover:bg-surface-2 text-neutral-600 hover:text-neutral-400 transition-colors"
+                  title="Collapse log panel"
                 >
-                  Copy
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
                 </button>
               </div>
-              <div className="flex-1 overflow-auto">
-                <Highlight theme={themes.nightOwl} code={selectedFileContent} language={getLang(selectedFile)}>
-                  {({ style, tokens, getLineProps, getTokenProps }) => (
-                    <pre style={{ ...style, margin: 0, padding: "1.25rem", background: "transparent" }} className="text-xs font-mono leading-relaxed">
-                      {tokens.map((line, i) => (
-                        <div key={i} {...getLineProps({ line })} className="table-row">
-                          <span className="table-cell pr-4 select-none text-right text-neutral-600 w-10">{i + 1}</span>
-                          <span className="table-cell">
-                            {line.map((token, key) => (
-                              <span key={key} {...getTokenProps({ token })} />
-                            ))}
-                          </span>
-                        </div>
-                      ))}
-                    </pre>
-                  )}
-                </Highlight>
+            </div>
+
+            {/* Scrollable log body */}
+            <div className="flex-1 overflow-y-auto log-scroll py-2 px-3 space-y-px">
+              {logs.map((log, i) => {
+                const isFileWrite = log.startsWith("  +");
+                const isStatus = log.startsWith("\u25b8");
+                return (
+                  <p
+                    key={i}
+                    className={`text-[11px] font-mono leading-relaxed py-px ${
+                      isFileWrite ? "text-accent/70" :
+                      isStatus ? "text-neutral-400" :
+                      "text-neutral-500"
+                    }`}
+                  >
+                    <span className="text-neutral-700/50 select-none mr-2 text-[10px]">
+                      {String(i + 1).padStart(3, "0")}
+                    </span>
+                    {log}
+                  </p>
+                );
+              })}
+            </div>
+
+            {/* Completion footer */}
+            <div className="px-4 py-2.5 border-t border-neutral-800 bg-surface-1/40">
+              <div className="flex items-center gap-2">
+                <svg className="w-3.5 h-3.5 text-emerald-500" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+                <span className="text-[10px] font-mono uppercase tracking-widest text-emerald-500/80">Clone complete</span>
               </div>
             </div>
           </div>
         )}
+
+        {/* Right Panel — Preview / Code */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Top bar */}
+          <div className="flex items-center gap-3 px-5 py-3 border-b border-neutral-800 bg-surface-0">
+            {!showLogs && logs.length > 0 && (
+              <button
+                onClick={() => setShowLogs(true)}
+                className="p-1.5 rounded-md hover:bg-surface-2 text-neutral-500 hover:text-neutral-300 transition-colors"
+                title="Show build log"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+                </svg>
+              </button>
+            )}
+            <button
+              onClick={handleReset}
+              className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+            >
+              <svg width="24" height="24" viewBox="0 0 173 173" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="172.339" height="172.339" rx="10" fill="black"/>
+                <rect x="79" y="36" width="20" height="7.5" rx="0.96" fill="#FFFEFE"/>
+                <rect x="72" y="49" width="20" height="7.5" rx="0.96" fill="#FFFEFE"/>
+                <rect x="65" y="63" width="33" height="7.5" rx="0.96" fill="#FFFEFE"/>
+                <rect x="59" y="76" width="19" height="7.5" rx="0.96" fill="#FFFEFE"/>
+                <rect x="51" y="90" width="60" height="7.5" rx="0.96" fill="#FFFEFE"/>
+                <rect x="45" y="104" width="20" height="7.5" rx="0.96" fill="#FFFEFE"/>
+                <rect x="110" y="104" width="18" height="7.5" rx="0.96" fill="#FFFEFE"/>
+                <rect x="40" y="118" width="20" height="7.5" rx="0.96" fill="#FFFEFE"/>
+                <rect x="115" y="118" width="21" height="7.5" rx="0.96" fill="#FFFEFE"/>
+                <rect x="23" y="131" width="45" height="7.5" rx="0.96" fill="#FFFEFE"/>
+                <rect x="109" y="131" width="40" height="7.5" rx="0.96" fill="#FFFEFE"/>
+              </svg>
+              <span className="text-sm font-serif font-semibold tracking-tight text-neutral-50">Clone</span>
+            </button>
+            <div className="h-4 w-px bg-neutral-700" />
+
+            {/* Preview / Code toggle */}
+            <div className="flex rounded-md bg-surface-1 p-0.5">
+              <button
+                onClick={() => setTab("preview")}
+                className={`text-xs font-mono uppercase tracking-wider px-3 py-1 rounded transition-colors ${
+                  tab === "preview"
+                    ? "bg-accent text-surface-0"
+                    : "text-neutral-400 hover:text-neutral-200"
+                }`}
+              >
+                Preview
+              </button>
+              <button
+                onClick={() => setTab("code")}
+                className={`text-xs font-mono uppercase tracking-wider px-3 py-1 rounded transition-colors ${
+                  tab === "code"
+                    ? "bg-accent text-surface-0"
+                    : "text-neutral-400 hover:text-neutral-200"
+                }`}
+              >
+                Code
+              </button>
+            </div>
+
+            <span className="text-sm text-neutral-500 font-mono truncate flex-1">{url}</span>
+            <button
+              onClick={handleReset}
+              className="text-xs font-mono uppercase tracking-wider px-3 py-1.5 rounded-md border border-neutral-700 text-neutral-400 hover:border-accent hover:text-accent transition-colors"
+            >
+              Clone another
+            </button>
+          </div>
+
+          {/* Preview — live sandbox iframe, static HTML preview, or redeploy prompt */}
+          {previewUrl ? (
+            <iframe
+              src={previewUrl}
+              sandbox="allow-scripts allow-same-origin"
+              className={`flex-1 w-full border-none bg-white ${tab !== "preview" ? "hidden" : ""}`}
+              title="Cloned website"
+            />
+          ) : staticHtml ? (
+            <div className={`flex-1 flex flex-col w-full ${tab !== "preview" ? "hidden" : ""}`}>
+              <iframe
+                srcDoc={staticHtml}
+                sandbox="allow-scripts allow-same-origin"
+                className="flex-1 w-full border-none bg-white"
+                title="Static preview"
+              />
+              {cloneId && (
+                <div className="flex items-center gap-3 px-4 py-2 bg-surface-1 border-t border-neutral-800">
+                  <span className="text-xs font-mono text-neutral-500">Static preview</span>
+                  <button
+                    onClick={handleRedeploy}
+                    disabled={redeploying}
+                    className="text-xs font-mono text-accent hover:underline disabled:opacity-50"
+                  >
+                    {redeploying ? "Deploying..." : "Launch live sandbox"}
+                  </button>
+                  {redeploying && redeployLogs.length > 0 && (
+                    <span className="text-xs font-mono text-neutral-500 truncate flex-1">
+                      {redeployLogs[redeployLogs.length - 1]}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            tab === "preview" && (
+              <div className="flex-1 flex items-center justify-center bg-surface-0">
+                <div className="text-center space-y-4">
+                  {redeploying ? (
+                    <div className="w-full max-w-2xl mx-auto flex flex-col items-center gap-6 px-4">
+                      <div className="flex flex-col items-center gap-3">
+                        <ArcSpinner />
+                        <p className="text-sm font-mono text-neutral-50">Re-deploying to sandbox...</p>
+                      </div>
+                      {redeployLogs.length > 0 && (
+                        <TerminalLog logs={redeployLogs} />
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-neutral-400 text-sm font-mono">
+                        No preview available.
+                      </p>
+                      {cloneId && (
+                        <button
+                          onClick={handleRedeploy}
+                          className="px-4 py-2 rounded-lg bg-accent text-surface-0 text-sm font-mono font-semibold hover:brightness-110 transition-all"
+                        >
+                          Deploy to sandbox
+                        </button>
+                      )}
+                      <p className="text-neutral-500 text-xs font-mono">
+                        Or switch to the Code tab to view the source.
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
+            )
+          )}
+
+          {/* Code view with file tree */}
+          {tab === "code" && (
+            <div className="flex-1 flex overflow-hidden bg-surface-0">
+              {/* File tree sidebar */}
+              <div className="w-60 shrink-0 border-r border-neutral-800 flex flex-col overflow-hidden">
+                <div className="px-3 py-2 border-b border-neutral-800 bg-surface-1/50">
+                  <span className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">Files</span>
+                </div>
+                <div className="flex-1 overflow-y-auto py-1 px-1">
+                  {fileTree.map((node) => (
+                    <FileTreeNode
+                      key={node.path}
+                      node={node}
+                      depth={0}
+                      selectedPath={selectedFile}
+                      onSelect={setSelectedFile}
+                      defaultOpen={true}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Code panel */}
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-2 border-b border-neutral-800">
+                  <span className="text-xs text-neutral-500 font-mono">{effectiveSelectedFile}</span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(selectedFileContent);
+                    }}
+                    className="text-xs font-mono px-2 py-1 rounded bg-surface-2 text-neutral-400 hover:text-accent hover:bg-surface-3 transition-colors"
+                  >
+                    Copy
+                  </button>
+                </div>
+                <div className="flex-1 overflow-auto">
+                  <Highlight theme={themes.nightOwl} code={selectedFileContent} language={getLang(effectiveSelectedFile)}>
+                    {({ style, tokens, getLineProps, getTokenProps }) => (
+                      <pre style={{ ...style, margin: 0, padding: "1.25rem", background: "transparent" }} className="text-xs font-mono leading-relaxed">
+                        {tokens.map((line, i) => (
+                          <div key={i} {...getLineProps({ line })} className="table-row">
+                            <span className="table-cell pr-4 select-none text-right text-neutral-600 w-10">{i + 1}</span>
+                            <span className="table-cell">
+                              {line.map((token, key) => (
+                                <span key={key} {...getTokenProps({ token })} />
+                              ))}
+                            </span>
+                          </div>
+                        ))}
+                      </pre>
+                    )}
+                  </Highlight>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -661,6 +805,9 @@ export default function Home() {
                 phase === "fixing" ? "Fixing build errors..." :
                 "Deploying to sandbox..."
               )}
+              {elapsed > 0 && (
+                <span className="text-neutral-600 ml-2">{elapsed}s</span>
+              )}
             </p>
           </div>
 
@@ -715,10 +862,50 @@ export default function Home() {
                         setUrl(data.url);
                         setCode(data.generated_code || "");
                         setFiles(data.files || {});
-                        setPreviewUrl("");
                         setCloneId(data.id);
-                        setTab("code");
+                        setTab("preview");
                         setPhase("done");
+
+                        // Use static HTML if available (instant), otherwise redeploy
+                        if (data.static_html) {
+                          setStaticHtml(data.static_html);
+                          setPreviewUrl("");
+                        } else {
+                          setStaticHtml("");
+                          setPreviewUrl("");
+                          setRedeploying(true);
+                          setRedeployLogs([]);
+                          fetch(`${process.env.NEXT_PUBLIC_API_URL}/clones/${data.id}/redeploy`, { method: "POST" })
+                            .then(async (res) => {
+                              if (!res.ok) throw new Error(`Request failed (${res.status})`);
+                              const reader = res.body?.getReader();
+                              if (!reader) throw new Error("No response body");
+                              const decoder = new TextDecoder();
+                              let buf = "";
+                              while (true) {
+                                const { done, value } = await reader.read();
+                                if (done) break;
+                                buf += decoder.decode(value, { stream: true });
+                                const lines = buf.split("\n");
+                                buf = lines.pop() || "";
+                                for (const line of lines) {
+                                  if (!line.startsWith("data: ")) continue;
+                                  const payload = JSON.parse(line.slice(6));
+                                  if (payload.log) setRedeployLogs((prev) => [...prev, payload.log]);
+                                  if (payload.status === "done" && payload.preview_url) {
+                                    setPreviewUrl(payload.preview_url);
+                                  }
+                                  if (payload.status === "error") {
+                                    setRedeployLogs((prev) => [...prev, `Error: ${payload.message}`]);
+                                  }
+                                }
+                              }
+                            })
+                            .catch((err: unknown) => {
+                              setRedeployLogs((prev) => [...prev, `Error: ${err instanceof Error ? err.message : "Failed"}`]);
+                            })
+                            .finally(() => setRedeploying(false));
+                        }
                       })
                       .catch(() => {});
                   }}

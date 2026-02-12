@@ -60,6 +60,7 @@ def _build_shared_context(
     logos: list[dict] | None = None,
     interactives: list[dict] | None = None,
     linked_pages: list[dict] | None = None,
+    nav_structure: list[dict] | None = None,
 ) -> dict:
     """Build shared context sections used by both full and section prompts."""
     max_html = 30000
@@ -237,6 +238,151 @@ def _build_shared_context(
             + "\n- For these, use <a> tags with the original URLs.\n"
         )
 
+    # Build navigation structure section (dropdowns with full content)
+    nav_section = ""
+    if nav_structure:
+        nav_parts = []
+        for nav_idx, nav in enumerate(nav_structure):
+            items = nav.get("items", [])
+            for item in items:
+                label = item.get("label", "?")
+                dropdown = item.get("dropdown")
+                if not dropdown:
+                    nav_parts.append(f"  - [{label}] (simple link)")
+                    continue
+
+                layout = item.get("dropdownLayout", "list")
+                panel_style = item.get("panelStyle", {})
+                style_desc = ""
+                if panel_style:
+                    style_parts = []
+                    if panel_style.get("backgroundColor"):
+                        style_parts.append(f"bg: {panel_style['backgroundColor']}")
+                    if panel_style.get("borderRadius"):
+                        style_parts.append(f"radius: {panel_style['borderRadius']}")
+                    if panel_style.get("boxShadow"):
+                        style_parts.append("has shadow")
+                    if panel_style.get("width"):
+                        style_parts.append(f"width: {panel_style['width']}px")
+                    if style_parts:
+                        style_desc = f" (panel: {', '.join(style_parts)})"
+
+                if layout == "mega":
+                    nav_parts.append(f"  - [{label}] MEGA DROPDOWN{style_desc}:")
+                    for group in dropdown:
+                        group_title = group.get("groupTitle", "")
+                        group_items = group.get("items", [])
+                        if group_title:
+                            nav_parts.append(f"      Group: \"{group_title}\"")
+                        for gi in group_items:
+                            title = gi.get("title", "?")
+                            desc = gi.get("description", "")
+                            has_icon = bool(gi.get("svgMarkup") or gi.get("iconSrc"))
+                            line = f"        - \"{title}\""
+                            if desc:
+                                line += f" — {desc}"
+                            if has_icon:
+                                line += " [has icon]"
+                            nav_parts.append(line)
+                else:
+                    nav_parts.append(f"  - [{label}] DROPDOWN ({len(dropdown)} items){style_desc}:")
+                    for di in dropdown:
+                        if isinstance(di, dict):
+                            title = di.get("title", "?")
+                            desc = di.get("description", "")
+                            has_icon = bool(di.get("svgMarkup") or di.get("iconSrc"))
+                            line = f"      - \"{title}\""
+                            if desc:
+                                line += f" — {desc}"
+                            if has_icon:
+                                line += " [has icon]"
+                            nav_parts.append(line)
+
+        if nav_parts:
+            nav_body = "\n".join(nav_parts)
+            # Cap nav section to ~4K chars to avoid prompt bloat
+            if len(nav_body) > 4000:
+                nav_body = nav_body[:4000] + "\n  ... (truncated, see HTML skeleton for remaining items)"
+            nav_section = (
+                "\n\nNAVIGATION STRUCTURE with dropdown content:\n"
+                + nav_body
+                + "\n\nCRITICAL DROPDOWN IMPLEMENTATION RULES:\n"
+                + "- Each dropdown trigger MUST be a button/link that toggles visibility on click.\n"
+                + "- Use SEPARATE useState for EACH dropdown: const [openMenu, setOpenMenu] = useState<string|null>(null);\n"
+                + "- Toggle pattern: onClick={() => setOpenMenu(openMenu === 'Products' ? null : 'Products')}\n"
+                + "- The dropdown panel MUST contain ALL items listed above — never skip or truncate.\n"
+                + "- MEGA dropdowns: render as a multi-column grid with group headings.\n"
+                + "- LIST dropdowns: render as a vertical list of links/items.\n"
+                + "- Include ALL descriptions and icons listed above.\n"
+                + "- Dropdown panel should appear on click, disappear when clicking elsewhere or pressing Escape.\n"
+                + "- Add: useEffect with click-outside handler and Escape key listener to close open dropdowns.\n"
+            )
+
+    # Build carousel/slider/tab section from interactive_elements
+    carousel_section = ""
+    if interactives:
+        carousel_parts = []
+        for ie in interactives:
+            if not isinstance(ie, dict):
+                continue
+            ie_type = ie.get("type", "carousel")
+            slides = ie.get("slides", [])
+            if not slides:
+                continue
+
+            slide_count = len(slides)
+            visible = ie.get("visibleCards", 1)
+            is_infinite = ie.get("isInfinite", False)
+
+            if ie_type == "tabs":
+                carousel_parts.append(f"  TAB GROUP ({slide_count} tabs):")
+                for idx, slide in enumerate(slides):
+                    title = slide.get("title", f"Tab {idx + 1}")
+                    panel_title = slide.get("panelTitle", "")
+                    panel_desc = slide.get("panelDescription", "")
+                    line = f"    Tab {idx + 1}: \"{title}\""
+                    if panel_title:
+                        line += f" → heading: \"{panel_title}\""
+                    if panel_desc:
+                        line += f" → \"{panel_desc[:100]}\""
+                    carousel_parts.append(line)
+            else:
+                inf_label = " (infinite loop)" if is_infinite else ""
+                carousel_parts.append(
+                    f"  CAROUSEL/SLIDER ({slide_count} slides, {visible} visible at a time{inf_label}):"
+                )
+                for idx, slide in enumerate(slides):
+                    parts = []
+                    if slide.get("title"):
+                        parts.append(f'title: "{slide["title"]}"')
+                    if slide.get("description"):
+                        parts.append(f'desc: "{slide["description"][:100]}"')
+                    if slide.get("image"):
+                        parts.append(f'img: {slide["image"]}')
+                    if slide.get("linkText"):
+                        parts.append(f'link: "{slide["linkText"]}"')
+                    if slide.get("text") and not slide.get("title"):
+                        parts.append(f'text: "{slide["text"][:100]}"')
+                    if parts:
+                        carousel_parts.append(f"    Slide {idx + 1}: {', '.join(parts)}")
+
+        if carousel_parts:
+            carousel_body = "\n".join(carousel_parts)
+            # Cap carousel section to ~3K chars
+            if len(carousel_body) > 3000:
+                carousel_body = carousel_body[:3000] + "\n  ... (truncated)"
+            carousel_section = (
+                "\n\nCARROUSELS/SLIDERS/TABS detected on the page:\n"
+                + carousel_body
+                + "\n\nCARROUSEL IMPLEMENTATION RULES:\n"
+                + "- Use useState for the active slide index.\n"
+                + "- Add prev/next arrow buttons that cycle through slides.\n"
+                + "- For infinite carousels: wrap around from last to first slide.\n"
+                + "- Include ALL slide content listed above — every title, description, and image.\n"
+                + "- For TAB groups: use useState to track active tab, show/hide panel content.\n"
+                + "- ALL tabs must work independently — clicking any tab shows its content.\n"
+            )
+
     return {
         "image_list": image_list,
         "styles_section": styles_section,
@@ -245,6 +391,8 @@ def _build_shared_context(
         "icons_section": icons_section,
         "interactives_section": interactives_section,
         "linked_pages_section": linked_pages_section,
+        "nav_section": nav_section,
+        "carousel_section": carousel_section,
         "truncated_html": truncated_html,
     }
 
@@ -258,16 +406,17 @@ def _common_rules_block(ctx: dict) -> str:
         '"use client" at top of every file, default export, valid TypeScript/JSX.\n'
         "ZERO PROPS: all data hardcoded inside. Components render as <Name /> with no props.\n"
         "Every JSX identifier (icons, components) MUST be imported. Missing imports crash the app.\n"
-        "Keep components under ~300 lines.\n"
+        "Keep components under ~200 lines. Output at most 2-3 component files per section — combine small pieces into one component.\n"
         "- HYDRATION: NEVER use Math.random(), Date.now(), or any non-deterministic values in render output.\n"
         "  These produce different values on server vs client, causing React hydration errors.\n"
         "  For random-looking patterns, use a deterministic pattern based on the index.\n\n"
 
         "## Stack\n"
-        "Next.js 14 + Tailwind CSS. Build UI from scratch with Tailwind.\n"
-        "Available: lucide-react icons, cn() from @/lib/utils, cva from class-variance-authority.\n"
-        "shadcn/ui: Use for standard interactive UI - buttons, dialogs, modals, dropdowns, tabs, forms, tooltips, accordions.\n"
-        "You MAY import any npm package - declare in DEPS line.\n\n"
+        "Next.js 16 + Tailwind CSS 4.\n"
+        "Pre-installed (no DEPS needed): lucide-react, framer-motion, class-variance-authority, "
+        "clsx, tailwind-merge, all @radix-ui/* primitives, cn() from @/lib/utils.\n"
+        "You MAY use ANY npm package or UI library — declare in DEPS line: // === DEPS: pkg1, pkg2 ===\n"
+        "Choose whatever best matches the site being cloned. Build component code inline (not from a CLI generator).\n\n"
 
         "## Visual accuracy\n"
         "- **Text**: copy ALL text VERBATIM from the HTML skeleton. Never paraphrase or use placeholders.\n"
@@ -279,7 +428,10 @@ def _common_rules_block(ctx: dict) -> str:
         f"\n### Image URLs with context:\n{ctx['image_list']}\n\n"
         "- **Logos**: ALWAYS use <img> with original URL or copy exact SVG markup. NEVER recreate logos with CSS/text.\n"
         "- **Fonts**: if Google Fonts detected, load via useEffect appending <link> to document.head.\n"
-        "- **Interactivity**: use useState for dropdowns, tabs, accordions, mobile menus.\n"
+        "- **Interactivity**: CRITICAL — every dropdown, tab, accordion, and toggle MUST work.\n"
+        "  Use useState with a single `openMenu` state variable (string|null) for navigation dropdowns.\n"
+        "  Use separate useState for each independent interactive feature (tabs, accordions, carousels).\n"
+        "  Add click-outside handler via useEffect to close open dropdowns.\n"
         "- **Links**: All <a> tags use href=\"#\" with onClick={e => e.preventDefault()}. No external navigation.\n\n"
 
         "## CRITICAL: NO EXPLANATORY TEXT\n"
@@ -292,6 +444,8 @@ def _common_rules_block(ctx: dict) -> str:
         f"{ctx['logos_section']}"
         f"{ctx['svgs_section']}"
         f"{ctx['icons_section']}"
+        f"{ctx['nav_section']}"
+        f"{ctx['carousel_section']}"
         f"{ctx['interactives_section']}"
         f"{ctx['linked_pages_section']}\n"
         "## HTML Skeleton (use screenshots as PRIMARY visual reference, this for text/structure):\n\n"
@@ -310,12 +464,14 @@ def build_prompt(
     logos: list[dict] | None = None,
     interactives: list[dict] | None = None,
     linked_pages: list[dict] | None = None,
+    nav_structure: list[dict] | None = None,
 ) -> str:
     """Build the full clone prompt for single-agent generation."""
     ctx = _build_shared_context(
         html, image_urls,
         styles=styles, font_links=font_links, icons=icons,
         svgs=svgs, logos=logos, interactives=interactives, linked_pages=linked_pages,
+        nav_structure=nav_structure,
     )
 
     return (
@@ -365,12 +521,14 @@ def build_section_prompt(
     logos: list[dict] | None = None,
     interactives: list[dict] | None = None,
     linked_pages: list[dict] | None = None,
+    nav_structure: list[dict] | None = None,
 ) -> str:
     """Build a section-specific prompt for one parallel agent."""
     ctx = _build_shared_context(
         html, image_urls,
         styles=styles, font_links=font_links, icons=icons,
         svgs=svgs, logos=logos, interactives=interactives, linked_pages=linked_pages,
+        nav_structure=nav_structure,
     )
 
     if section_positions and total_height > 0:
@@ -632,14 +790,10 @@ def _determine_agent_count(num_screenshots: int) -> int:
     """Scale number of parallel agents based on screenshot count."""
     if num_screenshots <= 1:
         return 1
-    elif num_screenshots <= 2:
+    elif num_screenshots <= 3:
         return 2
-    elif num_screenshots <= 4:
-        return 3
-    elif num_screenshots <= 6:
-        return 4
     else:
-        return min(num_screenshots, MAX_PARALLEL_AGENTS)
+        return min(3, MAX_PARALLEL_AGENTS)
 
 
 def _assign_screenshots_to_agents(
@@ -883,17 +1037,27 @@ async def _run_section_agent(
     content.append({"type": "text", "text": prompt})
 
     t0 = time.time()
-    try:
-        response = await client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": content}],
-            max_tokens=32000,
-            temperature=0,
-        )
-    except Exception as e:
-        logger.error(f"[ai] {agent_label} failed: {e}")
+    last_err = None
+    response = None
+    for attempt in range(2):  # retry once on transient errors
+        try:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": content}],
+                max_tokens=16000,
+                temperature=0,
+            )
+            break
+        except Exception as e:
+            last_err = e
+            if attempt == 0:
+                logger.warning(f"[ai] {agent_label} attempt 1 failed, retrying: {e}")
+                await asyncio.sleep(2)
+            else:
+                logger.error(f"[ai] {agent_label} failed after retry: {e}")
+    if response is None:
         if on_status:
-            await on_status({"status": "generating", "message": f"{agent_label}: FAILED - {e}"})
+            await on_status({"status": "generating", "message": f"{agent_label}: FAILED - {last_err}"})
         return {"files": [], "deps": [], "usage": {"tokens_in": 0, "tokens_out": 0}}
 
     raw_output = response.choices[0].message.content or ""
@@ -932,6 +1096,7 @@ async def generate_clone_parallel(
     logos: list[dict] | None = None,
     interactives: list[dict] | None = None,
     linked_pages: list[dict] | None = None,
+    nav_structure: list[dict] | None = None,
     scroll_positions: list[int] | None = None,
     total_height: int = 0,
     on_status=None,
@@ -953,6 +1118,7 @@ async def generate_clone_parallel(
         html=html, image_urls=image_urls,
         styles=styles, font_links=font_links, icons=icons,
         svgs=svgs, logos=logos, interactives=interactives, linked_pages=linked_pages,
+        nav_structure=nav_structure,
     )
 
     prompts = []
@@ -1054,6 +1220,7 @@ async def generate_clone(
     logos: list[dict] | None = None,
     interactives: list[dict] | None = None,
     linked_pages: list[dict] | None = None,
+    nav_structure: list[dict] | None = None,
     scroll_positions: list[int] | None = None,
     total_height: int = 0,
     on_status=None,
@@ -1078,6 +1245,7 @@ async def generate_clone(
             html=html, screenshots=screenshots, image_urls=image_urls, url=url,
             styles=styles, font_links=font_links, icons=icons,
             svgs=svgs, logos=logos, interactives=interactives, linked_pages=linked_pages,
+            nav_structure=nav_structure,
             scroll_positions=scroll_positions, total_height=total_height, on_status=on_status,
         )
 
@@ -1091,6 +1259,7 @@ async def generate_clone(
         html, image_urls, n,
         styles=styles, font_links=font_links, icons=icons,
         svgs=svgs, logos=logos, interactives=interactives, linked_pages=linked_pages,
+        nav_structure=nav_structure,
     )
 
     positions = scroll_positions or [0] * n
@@ -1233,11 +1402,7 @@ async def fix_build_errors(
             fixed_files[matched_key] = result["content"]
             return fixed_files, []
 
-    # Fallback: fix all generated TSX files
-    logger.warning("[ai-fix] Could not identify failing file, fixing all components")
-    fixed_files = dict(generated_files)
-    for path, code in generated_files.items():
-        if path.endswith(".tsx"):
-            result = await fix_component(path, code, error_text)
-            fixed_files[path] = result["content"]
-    return fixed_files, []
+    # Can't identify the failing file — return files unchanged rather than
+    # rewriting everything (which destroys styling/content).
+    logger.warning("[ai-fix] Could not identify failing file, skipping fix to preserve content")
+    return generated_files, []

@@ -659,8 +659,35 @@ async def scrape_page(
 
         nav_start = time.time()
         _log("Navigating to page...")
-        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        await page.wait_for_timeout(3000)
+
+        # Strategy: use "commit" (waits only for server response headers) so we
+        # never fail on slow SSR pages.  Then separately wait for content.
+        try:
+            await page.goto(url, wait_until="commit", timeout=30000)
+        except Exception:
+            # Even commit failed — server may be completely unresponsive.
+            # Check if the page got *any* content anyway (redirects, partial load).
+            pass
+
+        # Now wait for meaningful content to appear, handling both SSR and CSR:
+        # 1. domcontentloaded — HTML fully parsed (SSR pages are done here)
+        # 2. Visible content selector — catches CSR/SPA pages that render via JS
+        loaded = False
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=15000)
+            loaded = True
+        except Exception:
+            _log("DOM still loading, waiting for visible content...")
+
+        if not loaded:
+            # CSR/SPA fallback: wait for any visible content in <body>
+            try:
+                await page.wait_for_selector("body > *", state="visible", timeout=15000)
+            except Exception:
+                pass
+
+        # Brief extra settle time for late hydration / async renders
+        await page.wait_for_timeout(2000)
         _log(f"Page loaded in {time.time() - nav_start:.1f}s")
 
         # Scroll to bottom to trigger all lazy-loaded content

@@ -24,6 +24,7 @@ from app.services.deployer import (
     deploy_to_sandbox,
     build_with_retry,
     start_preview,
+    capture_static_html,
     _create_sandbox,
     TEMPLATE_DIR,
     TEMPLATE_FILES,
@@ -171,6 +172,7 @@ async def clone_website(req: CloneRequest):
             scroll_positions = scrape_data.get("scroll_positions", [])
             total_height = scrape_data.get("total_height", 0)
             interactive_elements = scrape_data.get("interactive_elements", [])
+            nav_structure = scrape_data.get("nav_structure", [])
 
             try:
                 gen_task = asyncio.create_task(generate_clone(
@@ -181,6 +183,7 @@ async def clone_website(req: CloneRequest):
                     styles=computed_styles,
                     font_links=font_links,
                     interactives=interactive_elements,
+                    nav_structure=nav_structure,
                     scroll_positions=scroll_positions,
                     total_height=total_height,
                     on_status=on_ai_status,
@@ -222,7 +225,13 @@ async def clone_website(req: CloneRequest):
                 generated_files[path] = f["content"]
             extra_deps = result.get("deps", [])
 
+            # Find page.tsx content — try exact key, then any page.tsx variant
             generated_code = generated_files.get("src/app/page.tsx", "")
+            if not generated_code:
+                for k, v in generated_files.items():
+                    if k.endswith("page.tsx"):
+                        generated_code = v
+                        break
             yield _log(f"AI generated {len(generated_files)} file(s): {', '.join(generated_files.keys())}")
             if extra_deps:
                 yield _log(f"AI requested extra packages: {', '.join(extra_deps)}")
@@ -240,47 +249,78 @@ async def clone_website(req: CloneRequest):
             yield _status("deploying", "Preparing sandbox...")
             await asyncio.sleep(0)
 
+            # Queue for streaming deploy progress to SSE
+            deploy_queue: asyncio.Queue = asyncio.Queue()
+
+            async def deploy_log(msg: str):
+                await deploy_queue.put(msg)
+
             preview_url = None
-            try:
-                # Await the pre-created sandbox (should already be done by now)
-                sandbox = await sandbox_task
-                if sandbox is not None:
-                    sandbox_elapsed = time.time() - scrape_start
-                    yield _log(f"Sandbox ready (pre-created during scrape/generate, {sandbox_elapsed:.1f}s ago)")
+            static_html = None
+            deploy_error = None
 
-                sandbox, project_dir = await deploy_to_sandbox(generated_files, extra_deps, sandbox=sandbox)
+            async def _run_deploy():
+                nonlocal preview_url, static_html, generated_files, extra_deps, deploy_error
+                try:
+                    # Await the pre-created sandbox
+                    sandbox = await sandbox_task
+                    if sandbox is not None:
+                        sandbox_elapsed = time.time() - scrape_start
+                        await deploy_log(f"Sandbox ready (pre-created during scrape/generate, {sandbox_elapsed:.1f}s ago)")
 
-                if sandbox is None:
-                    yield _log("DAYTONA_API_KEY not set — skipping deployment")
-                else:
-                    yield _log("Files uploaded, dependencies installed")
-
-                    # ── BUILD CHECK WITH RETRY ────────────────────────
-                    yield _status("deploying", "Building project...")
-                    yield _log("Running next build...")
-                    await asyncio.sleep(0)
-
-                    build_ok, generated_files, extra_deps = await build_with_retry(
-                        sandbox, project_dir, generated_files, [], extra_deps,
-                        api_key, on_log=_log, on_status=_status,
+                    sb, project_dir = await deploy_to_sandbox(
+                        generated_files, extra_deps, sandbox=sandbox, on_log=deploy_log,
                     )
-                    generated_code = generated_files.get("src/app/page.tsx", "")
 
-                    if build_ok:
-                        yield _log("Build succeeded!")
-                    else:
-                        yield _log(f"All {MAX_BUILD_ATTEMPTS} build attempts failed — proceeding anyway")
+                    if sb is None:
+                        await deploy_log("DAYTONA_API_KEY not set — skipping deployment")
+                        return
 
-                    # Start dev server
-                    yield _status("deploying", "Starting Next.js server...")
-                    yield _log("Starting next dev on port 8080...")
-                    preview_url = await start_preview(sandbox, project_dir)
+                    # Build with retry
+                    build_ok, generated_files, extra_deps = await build_with_retry(
+                        sb, project_dir, generated_files, [], extra_deps,
+                        api_key, on_log=deploy_log,
+                    )
+
+                    if not build_ok:
+                        await deploy_log(f"All {MAX_BUILD_ATTEMPTS} build attempts failed — proceeding anyway")
+
+                    # Capture static HTML from the export (out/) for instant history previews
+                    static_html = await capture_static_html(sb, project_dir, on_log=deploy_log)
+
+                    # Start dev server for live preview
+                    preview_url = await start_preview(sb, project_dir, on_log=deploy_log)
                     deploy_elapsed = time.time() - deploy_start
                     logger.info("[deploy] COMPLETE in %.1fs — preview: %s", deploy_elapsed, preview_url)
-                    yield _log(f"Preview ready: {preview_url}")
-            except Exception as e:
-                logger.error("[deploy] FAILED for %s: %s\n%s", url_str, e, traceback.format_exc())
-                yield _log(f"Deployment error: {e}")
+                    await deploy_log(f"Preview URL: {preview_url}")
+                except Exception as e:
+                    logger.error("[deploy] FAILED for %s: %s\n%s", url_str, e, traceback.format_exc())
+                    deploy_error = e
+                    await deploy_log(f"Deployment error: {e}")
+
+            deploy_task = asyncio.create_task(_run_deploy())
+
+            # Poll the queue and stream logs to SSE while deploy runs
+            while not deploy_task.done():
+                try:
+                    msg = await asyncio.wait_for(deploy_queue.get(), timeout=0.5)
+                    yield _log(msg)
+                except asyncio.TimeoutError:
+                    pass
+
+            # Drain remaining queued logs
+            while not deploy_queue.empty():
+                yield _log(deploy_queue.get_nowait())
+
+            # Re-raise if deploy had an uncaught exception
+            try:
+                exc = deploy_task.exception()
+                if exc and deploy_error is None:
+                    raise exc
+            except (asyncio.CancelledError, asyncio.InvalidStateError):
+                pass
+
+            generated_code = generated_files.get("src/app/page.tsx", "")
 
             # ── DONE ──────────────────────────────────────────────
             project_files: dict[str, str] = {}
@@ -298,7 +338,10 @@ async def clone_website(req: CloneRequest):
                 url_str, total_elapsed, len(generated_code), preview_url or "none",
             )
 
-            _db_update_clone(clone_id, status="done", preview_url=preview_url, generated_code=generated_code, completed_at=datetime.now(timezone.utc).isoformat())
+            db_fields = dict(status="done", preview_url=preview_url, generated_code=generated_code, completed_at=datetime.now(timezone.utc).isoformat())
+            if static_html:
+                db_fields["static_html"] = static_html
+            _db_update_clone(clone_id, **db_fields)
 
             yield _sse_event({
                 "status": "done",
@@ -306,6 +349,7 @@ async def clone_website(req: CloneRequest):
                 "preview_url": preview_url,
                 "clone_id": clone_id,
                 "files": project_files,
+                "static_html": static_html,
             })
 
         except HTTPException as e:
@@ -443,14 +487,14 @@ async def redeploy_clone(clone_id: str):
 
             # npm install
             yield _status("deploying", "Installing dependencies...")
-            yield _log("Running npm install...")
+            yield _log("Installing dependencies...")
             npm_start = time.time()
             await asyncio.to_thread(
                 sandbox.process.exec,
                 f"cd {project_dir} && npm install",
             )
             logger.info("[redeploy] npm install completed in %.1fs", time.time() - npm_start)
-            yield _log("npm install complete")
+            yield _log(f"Dependencies installed in {time.time() - npm_start:.1f}s")
 
             # Build
             yield _status("deploying", "Building project...")

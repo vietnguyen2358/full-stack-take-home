@@ -70,16 +70,16 @@ function FileTreeNode({
       <div>
         <button
           onClick={() => setOpen(!open)}
-          className="flex items-center gap-1.5 w-full text-left py-0.5 hover:bg-zinc-800/50 rounded px-1 transition-colors"
+          className="flex items-center gap-1.5 w-full text-left py-0.5 hover:bg-surface-2/50 rounded px-1 transition-colors"
           style={{ paddingLeft: depth * 12 + 4 }}
         >
-          <span className="text-zinc-500 text-xs w-3 text-center shrink-0">
+          <span className="text-neutral-500 text-xs w-3 text-center shrink-0">
             {open ? "▾" : "▸"}
           </span>
-          <svg className="w-4 h-4 shrink-0 text-zinc-500" viewBox="0 0 20 20" fill="currentColor">
+          <svg className="w-4 h-4 shrink-0 text-neutral-500" viewBox="0 0 20 20" fill="currentColor">
             <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
           </svg>
-          <span className="text-xs text-zinc-400 truncate">{node.name}</span>
+          <span className="text-xs text-neutral-400 truncate">{node.name}</span>
         </button>
         {open && node.children!.map((child) => (
           <FileTreeNode
@@ -101,13 +101,15 @@ function FileTreeNode({
     ext === "json" ? "text-yellow-400" :
     ext === "css" ? "text-purple-400" :
     ext === "mjs" ? "text-green-400" :
-    "text-zinc-500";
+    "text-neutral-500";
 
   return (
     <button
       onClick={() => onSelect(node.path)}
       className={`flex items-center gap-1.5 w-full text-left py-0.5 rounded px-1 transition-colors ${
-        isSelected ? "bg-zinc-800 text-white" : "hover:bg-zinc-800/50 text-zinc-400"
+        isSelected
+          ? "bg-surface-2 text-neutral-50 border-r-2 border-accent"
+          : "hover:bg-surface-2/50 text-neutral-400"
       }`}
       style={{ paddingLeft: depth * 12 + 4 + 16 }}
     >
@@ -126,6 +128,73 @@ function getLang(path: string): string {
     json: "json", css: "css", mjs: "javascript", html: "markup",
   };
   return map[ext] || "typescript";
+}
+
+// ── SVG Arc Spinner ──────────────────────────────────────────
+function ArcSpinner({ size = 32 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 50 50"
+      className="animate-[spinner-rotate_2s_linear_infinite]"
+    >
+      <circle
+        cx="25"
+        cy="25"
+        r="20"
+        fill="none"
+        stroke="var(--accent)"
+        strokeWidth="3"
+        strokeLinecap="round"
+        className="animate-[spinner-dash_1.5s_ease-in-out_infinite]"
+      />
+    </svg>
+  );
+}
+
+// ── Terminal Log Component ───────────────────────────────────
+function TerminalLog({
+  logs,
+  logEndRef,
+  variant = "default",
+  eventCount,
+}: {
+  logs: string[];
+  logEndRef?: React.RefObject<HTMLDivElement | null>;
+  variant?: "default" | "error";
+  eventCount?: number;
+}) {
+  const dotColor = variant === "error" ? "bg-error" : "bg-accent";
+  const count = eventCount ?? logs.length;
+
+  return (
+    <div className="w-full rounded-lg border border-neutral-800 bg-surface-1/50 overflow-hidden">
+      {/* Terminal chrome */}
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-neutral-800 bg-surface-1">
+        <div className="flex items-center gap-1.5">
+          <div className={`w-2 h-2 rounded-full ${dotColor}`} />
+          <div className="w-2 h-2 rounded-full bg-neutral-700" />
+          <div className="w-2 h-2 rounded-full bg-neutral-700" />
+        </div>
+        <span className="text-[10px] font-mono uppercase tracking-widest text-neutral-500 ml-2">Activity</span>
+        <span className="text-[10px] font-mono text-neutral-600 ml-auto">{count} events</span>
+      </div>
+      <div className="max-h-52 overflow-y-auto p-3 space-y-0.5">
+        {logs.map((log, i) => (
+          <p key={i} className="text-xs font-mono leading-relaxed text-neutral-500">
+            <span className="text-neutral-700 select-none mr-2">{String(i + 1).padStart(2, "0")}</span>
+            {log}
+          </p>
+        ))}
+        {/* Blinking cursor on last line */}
+        {variant !== "error" && (
+          <span className="inline-block w-1.5 h-3.5 bg-accent animate-[cursor-blink_1s_step-end_infinite] align-middle ml-1" />
+        )}
+        {logEndRef && <div ref={logEndRef} />}
+      </div>
+    </div>
+  );
 }
 
 // ── Main component ───────────────────────────────────────────
@@ -305,48 +374,62 @@ export default function Home() {
 
   const selectedFileContent = files[selectedFile] || "";
 
-  // ---------- Result view (after clone is done) ----------
+  // ────────── Result view (Done state) ──────────
   if (phase === "done" && code) {
     return (
-      <div className="flex flex-col h-screen">
+      <div className="flex flex-col h-screen bg-surface-0">
         {/* Top bar */}
-        <div className="flex items-center gap-3 px-5 py-3 border-b border-zinc-800 bg-zinc-950">
+        <div className="flex items-center gap-3 px-5 py-3 border-b border-neutral-800 bg-surface-0">
           <button
             onClick={handleReset}
-            className="text-sm font-semibold tracking-tight text-white hover:text-zinc-300 transition-colors"
+            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
           >
-            Clone
+            <svg width="24" height="24" viewBox="0 0 173 173" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="172.339" height="172.339" rx="10" fill="black"/>
+              <rect x="79" y="36" width="20" height="7.5" rx="0.96" fill="#FFFEFE"/>
+              <rect x="72" y="49" width="20" height="7.5" rx="0.96" fill="#FFFEFE"/>
+              <rect x="65" y="63" width="33" height="7.5" rx="0.96" fill="#FFFEFE"/>
+              <rect x="59" y="76" width="19" height="7.5" rx="0.96" fill="#FFFEFE"/>
+              <rect x="51" y="90" width="60" height="7.5" rx="0.96" fill="#FFFEFE"/>
+              <rect x="45" y="104" width="20" height="7.5" rx="0.96" fill="#FFFEFE"/>
+              <rect x="110" y="104" width="18" height="7.5" rx="0.96" fill="#FFFEFE"/>
+              <rect x="40" y="118" width="20" height="7.5" rx="0.96" fill="#FFFEFE"/>
+              <rect x="115" y="118" width="21" height="7.5" rx="0.96" fill="#FFFEFE"/>
+              <rect x="23" y="131" width="45" height="7.5" rx="0.96" fill="#FFFEFE"/>
+              <rect x="109" y="131" width="40" height="7.5" rx="0.96" fill="#FFFEFE"/>
+            </svg>
+            <span className="text-sm font-serif font-semibold tracking-tight text-neutral-50">Clone</span>
           </button>
-          <div className="h-4 w-px bg-zinc-700" />
+          <div className="h-4 w-px bg-neutral-700" />
 
           {/* Preview / Code toggle */}
-          <div className="flex rounded-md bg-zinc-900 p-0.5">
+          <div className="flex rounded-md bg-surface-1 p-0.5">
             <button
               onClick={() => setTab("preview")}
-              className={`text-xs font-medium px-3 py-1 rounded transition-colors ${
+              className={`text-xs font-mono uppercase tracking-wider px-3 py-1 rounded transition-colors ${
                 tab === "preview"
-                  ? "bg-zinc-700 text-white"
-                  : "text-zinc-400 hover:text-zinc-200"
+                  ? "bg-accent text-surface-0"
+                  : "text-neutral-400 hover:text-neutral-200"
               }`}
             >
               Preview
             </button>
             <button
               onClick={() => setTab("code")}
-              className={`text-xs font-medium px-3 py-1 rounded transition-colors ${
+              className={`text-xs font-mono uppercase tracking-wider px-3 py-1 rounded transition-colors ${
                 tab === "code"
-                  ? "bg-zinc-700 text-white"
-                  : "text-zinc-400 hover:text-zinc-200"
+                  ? "bg-accent text-surface-0"
+                  : "text-neutral-400 hover:text-neutral-200"
               }`}
             >
               Code
             </button>
           </div>
 
-          <span className="text-sm text-zinc-500 truncate flex-1">{url}</span>
+          <span className="text-sm text-neutral-500 font-mono truncate flex-1">{url}</span>
           <button
             onClick={handleReset}
-            className="text-sm px-3 py-1.5 rounded-md bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
+            className="text-xs font-mono uppercase tracking-wider px-3 py-1.5 rounded-md border border-neutral-700 text-neutral-400 hover:border-accent hover:text-accent transition-colors"
           >
             Clone another
           </button>
@@ -362,46 +445,32 @@ export default function Home() {
           />
         ) : (
           tab === "preview" && (
-            <div className="flex-1 flex items-center justify-center bg-zinc-950">
+            <div className="flex-1 flex items-center justify-center bg-surface-0">
               <div className="text-center space-y-4">
                 {redeploying ? (
                   <div className="w-full max-w-2xl mx-auto flex flex-col items-center gap-6 px-4">
                     <div className="flex flex-col items-center gap-3">
-                      <div className="w-8 h-8 border-2 border-zinc-700 border-t-white rounded-full" style={{ animation: "spin-slow 1s linear infinite" }} />
-                      <p className="text-sm font-medium text-white">Re-deploying to sandbox...</p>
+                      <ArcSpinner />
+                      <p className="text-sm font-mono text-neutral-50">Re-deploying to sandbox...</p>
                     </div>
                     {redeployLogs.length > 0 && (
-                      <div className="w-full rounded-lg border border-zinc-800 bg-zinc-900/50 overflow-hidden">
-                        <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800 bg-zinc-900">
-                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                          <span className="text-xs font-medium text-zinc-400">Activity</span>
-                          <span className="text-xs text-zinc-600 ml-auto">{redeployLogs.length} events</span>
-                        </div>
-                        <div className="max-h-52 overflow-y-auto p-3 space-y-0.5 text-left">
-                          {redeployLogs.map((log, i) => (
-                            <p key={i} className="text-xs font-mono leading-relaxed text-zinc-500">
-                              <span className="text-zinc-700 select-none mr-2">{String(i + 1).padStart(2, "0")}</span>
-                              {log}
-                            </p>
-                          ))}
-                        </div>
-                      </div>
+                      <TerminalLog logs={redeployLogs} />
                     )}
                   </div>
                 ) : (
                   <>
-                    <p className="text-zinc-400 text-sm">
+                    <p className="text-neutral-400 text-sm font-mono">
                       Sandbox preview has expired.
                     </p>
                     {cloneId && (
                       <button
                         onClick={handleRedeploy}
-                        className="px-4 py-2 rounded-lg bg-white text-black text-sm font-semibold hover:bg-zinc-200 transition-colors"
+                        className="px-4 py-2 rounded-lg bg-accent text-surface-0 text-sm font-mono font-semibold hover:brightness-110 transition-all"
                       >
                         Re-deploy to sandbox
                       </button>
                     )}
-                    <p className="text-zinc-500 text-xs">
+                    <p className="text-neutral-500 text-xs font-mono">
                       Or switch to the Code tab to view the source.
                     </p>
                   </>
@@ -413,11 +482,11 @@ export default function Home() {
 
         {/* Code view with file tree */}
         {tab === "code" && (
-          <div className="flex-1 flex overflow-hidden bg-zinc-950">
+          <div className="flex-1 flex overflow-hidden bg-surface-0">
             {/* File tree sidebar */}
-            <div className="w-60 shrink-0 border-r border-zinc-800 flex flex-col overflow-hidden">
-              <div className="px-3 py-2 border-b border-zinc-800 bg-zinc-900/50">
-                <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Files</span>
+            <div className="w-60 shrink-0 border-r border-neutral-800 flex flex-col overflow-hidden">
+              <div className="px-3 py-2 border-b border-neutral-800 bg-surface-1/50">
+                <span className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">Files</span>
               </div>
               <div className="flex-1 overflow-y-auto py-1 px-1">
                 {fileTree.map((node) => (
@@ -435,13 +504,13 @@ export default function Home() {
 
             {/* Code panel */}
             <div className="flex-1 flex flex-col overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-2 border-b border-zinc-800">
-                <span className="text-xs text-zinc-500 font-mono">{selectedFile}</span>
+              <div className="flex items-center justify-between px-5 py-2 border-b border-neutral-800">
+                <span className="text-xs text-neutral-500 font-mono">{selectedFile}</span>
                 <button
                   onClick={() => {
                     navigator.clipboard.writeText(selectedFileContent);
                   }}
-                  className="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors"
+                  className="text-xs font-mono px-2 py-1 rounded bg-surface-2 text-neutral-400 hover:text-accent hover:bg-surface-3 transition-colors"
                 >
                   Copy
                 </button>
@@ -452,7 +521,7 @@ export default function Home() {
                     <pre style={{ ...style, margin: 0, padding: "1.25rem", background: "transparent" }} className="text-xs font-mono leading-relaxed">
                       {tokens.map((line, i) => (
                         <div key={i} {...getLineProps({ line })} className="table-row">
-                          <span className="table-cell pr-4 select-none text-right text-zinc-600 w-10">{i + 1}</span>
+                          <span className="table-cell pr-4 select-none text-right text-neutral-600 w-10">{i + 1}</span>
                           <span className="table-cell">
                             {line.map((token, key) => (
                               <span key={key} {...getTokenProps({ token })} />
@@ -471,25 +540,55 @@ export default function Home() {
     );
   }
 
-  // ---------- Landing / Loading / Error view ----------
+  // ────────── Landing / Loading / Error view ──────────
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen px-6">
+    <div className="relative flex flex-col items-center justify-center min-h-screen px-6 overflow-hidden">
+      {/* Hero glow */}
+      <div className="hero-glow absolute inset-0 pointer-events-none" />
+
       {/* Hero */}
-      <div className="flex flex-col items-center gap-4 mb-10 text-center">
-        <h1 className="text-5xl font-bold tracking-tight text-white">
+      <div className="relative flex flex-col items-center gap-5 mb-10 text-center">
+        {/* Logo — bars pulse blue when loading */}
+        <div className="relative animate-fade-in-up">
+          <div className="absolute inset-0 blur-2xl bg-accent/10 rounded-full scale-150" />
+          <svg width="72" height="72" viewBox="0 0 173 173" fill="none" xmlns="http://www.w3.org/2000/svg" className={`relative ${isLoading ? "animate-[logo-pulse_2s_ease-in-out_infinite]" : ""}`}>
+            <rect width="172.339" height="172.339" rx="10" fill="black"/>
+            {[
+              { x: 79, y: 36, w: 20 },
+              { x: 72, y: 49, w: 20 },
+              { x: 65, y: 63, w: 33 },
+              { x: 59, y: 76, w: 19 },
+              { x: 51, y: 90, w: 60 },
+              { x: 45, y: 104, w: 20 },
+              { x: 110, y: 104, w: 18 },
+              { x: 40, y: 118, w: 20 },
+              { x: 115, y: 118, w: 21 },
+              { x: 23, y: 131, w: 45 },
+              { x: 109, y: 131, w: 40 },
+            ].map((r, i) => (
+              <rect key={i} x={r.x} y={r.y} width={r.w} height={7.5} rx={0.96} fill={isLoading ? "#3B82F6" : "#FFFEFE"}>
+                {isLoading && (
+                  <animate attributeName="opacity" values="1;0.3;1" dur="2s" begin={`${i * 0.1}s`} repeatCount="indefinite" />
+                )}
+              </rect>
+            ))}
+          </svg>
+        </div>
+
+        <h1 className="font-serif text-7xl font-bold tracking-tight text-neutral-50 animate-fade-in-up delay-100">
           Clone
         </h1>
-        <p className="text-lg text-zinc-400 max-w-md">
-          Paste any URL and get an AI-generated replica in seconds.
+        <p className="text-sm font-mono uppercase tracking-[0.2em] text-neutral-400 max-w-md animate-fade-in-up delay-200">
+          Paste any URL. Get an AI-generated replica in minutes.
         </p>
       </div>
 
-      {/* URL Input */}
+      {/* URL Input — button embedded inside */}
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-xl flex items-center gap-2"
+        className="relative w-full max-w-xl animate-fade-in-up delay-300"
       >
-        <div className="relative flex-1">
+        <div className="relative input-glow rounded-xl border border-neutral-700 bg-surface-1 transition-all">
           <input
             type="url"
             required
@@ -497,26 +596,24 @@ export default function Home() {
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             disabled={isLoading}
-            className="w-full h-12 pl-4 pr-4 rounded-lg border border-zinc-700 bg-zinc-900 text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:border-transparent disabled:opacity-50 transition-all"
+            className="w-full h-14 pl-4 pr-32 rounded-xl bg-transparent text-neutral-50 font-mono text-ellipsis placeholder:text-neutral-600 focus:outline-none disabled:opacity-50 transition-all"
           />
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="absolute right-2 top-1/2 -translate-y-1/2 h-10 px-5 rounded-lg bg-accent text-surface-0 font-mono font-semibold text-sm whitespace-nowrap shrink-0 hover:brightness-110 disabled:opacity-50 transition-all"
+          >
+            {isLoading ? "Cloning..." : "Clone"}
+          </button>
         </div>
-        <button
-          type="submit"
-          disabled={isLoading}
-          className="h-12 px-6 rounded-lg bg-white text-black font-semibold hover:bg-zinc-200 disabled:opacity-50 transition-colors shrink-0"
-        >
-          {isLoading ? "Cloning..." : "Clone"}
-        </button>
       </form>
 
       {/* Progress + Activity Log */}
       {isLoading && (
-        <div className="mt-8 w-full max-w-2xl flex flex-col items-center gap-6">
-          {/* Spinner + Step indicator */}
+        <div className="mt-8 w-full max-w-2xl flex flex-col items-center gap-6 animate-fade-in-up">
+          {/* Step indicator */}
           <div className="flex flex-col items-center gap-4">
-            <div className="w-8 h-8 border-2 border-zinc-700 border-t-white rounded-full" style={{ animation: "spin-slow 1s linear infinite" }} />
-
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4">
               {[
                 { key: "scraping", label: "Scrape" },
                 { key: "generating", label: "Generate" },
@@ -527,22 +624,20 @@ export default function Home() {
                 const isActive = step.key === phase;
                 const isCompleted = i < currentIdx;
                 return (
-                  <div key={step.key} className="flex items-center gap-3">
+                  <div key={step.key} className="flex items-center gap-4">
                     {i > 0 && (
-                      <div className={`w-8 h-px ${isCompleted || isActive ? "bg-white" : "bg-zinc-700"}`} />
+                      <div className={`w-8 h-px ${isCompleted || isActive ? "bg-accent" : "bg-neutral-700"}`} />
                     )}
                     <div className="flex items-center gap-2">
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium border ${
+                      <div className={`w-2 h-2 rounded-full transition-colors ${
                         isActive
-                          ? "border-white text-white"
+                          ? "bg-accent animate-[glow-pulse_2s_ease-in-out_infinite]"
                           : isCompleted
-                          ? "border-white bg-white text-black"
-                          : "border-zinc-700 text-zinc-600"
-                      }`}>
-                        {isCompleted ? "✓" : i + 1}
-                      </div>
-                      <span className={`text-xs font-medium ${
-                        isActive ? "text-white" : isCompleted ? "text-zinc-400" : "text-zinc-600"
+                          ? "bg-accent"
+                          : "bg-neutral-700"
+                      }`} />
+                      <span className={`text-[10px] font-mono uppercase tracking-widest transition-colors ${
+                        isActive ? "text-accent" : isCompleted ? "text-neutral-400" : "text-neutral-600"
                       }`}>
                         {step.label}
                       </span>
@@ -552,7 +647,7 @@ export default function Home() {
               })}
             </div>
 
-            <p className="text-sm font-medium text-white">
+            <p className="text-sm font-mono text-neutral-300">
               {statusMessage || (
                 phase === "scraping" ? "Scraping website..." :
                 phase === "generating" ? "Generating clone with AI..." :
@@ -564,56 +659,28 @@ export default function Home() {
 
           {/* Activity Log */}
           {logs.length > 0 && (
-            <div className="w-full rounded-lg border border-zinc-800 bg-zinc-900/50 overflow-hidden">
-              <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800 bg-zinc-900">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-xs font-medium text-zinc-400">Activity</span>
-                <span className="text-xs text-zinc-600 ml-auto">{logs.length} events</span>
-              </div>
-              <div className="max-h-52 overflow-y-auto p-3 space-y-0.5">
-                {logs.map((log, i) => (
-                  <p key={i} className="text-xs font-mono leading-relaxed text-zinc-500">
-                    <span className="text-zinc-700 select-none mr-2">{String(i + 1).padStart(2, "0")}</span>
-                    {log}
-                  </p>
-                ))}
-                <div ref={logEndRef} />
-              </div>
-            </div>
+            <TerminalLog logs={logs} logEndRef={logEndRef} />
           )}
         </div>
       )}
 
       {/* Error */}
       {phase === "error" && (
-        <div className="mt-6 w-full max-w-2xl space-y-3">
+        <div className="mt-6 w-full max-w-2xl space-y-3 animate-fade-in-up">
           {error && (
-            <div className="px-4 py-3 rounded-lg bg-red-950/50 border border-red-900/50">
-              <p className="text-sm text-red-400">{error}</p>
+            <div className="px-4 py-3 rounded-lg bg-error-dim border border-error/20">
+              <p className="text-sm font-mono text-error">{error}</p>
             </div>
           )}
 
-          {/* Show activity log on error too so user can see what happened */}
+          {/* Show activity log on error too */}
           {logs.length > 0 && (
-            <div className="w-full rounded-lg border border-zinc-800 bg-zinc-900/50 overflow-hidden">
-              <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800 bg-zinc-900">
-                <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                <span className="text-xs font-medium text-zinc-400">Activity Log</span>
-              </div>
-              <div className="max-h-52 overflow-y-auto p-3 space-y-0.5">
-                {logs.map((log, i) => (
-                  <p key={i} className="text-xs font-mono leading-relaxed text-zinc-500">
-                    <span className="text-zinc-700 select-none mr-2">{String(i + 1).padStart(2, "0")}</span>
-                    {log}
-                  </p>
-                ))}
-              </div>
-            </div>
+            <TerminalLog logs={logs} variant="error" />
           )}
 
           <button
             onClick={handleReset}
-            className="text-sm text-zinc-400 hover:text-white transition-colors"
+            className="text-sm font-mono text-neutral-400 hover:text-accent hover:underline underline-offset-4 transition-colors"
           >
             Try again
           </button>
@@ -622,14 +689,14 @@ export default function Home() {
 
       {/* Clone History */}
       {!isLoading && phase !== "error" && history.length > 0 && (
-        <div className="mt-12 w-full max-w-2xl">
-          <h2 className="text-sm font-medium text-zinc-500 mb-3">Recent clones</h2>
+        <div className="relative mt-12 w-full max-w-2xl animate-fade-in-up delay-400">
+          <h2 className="text-[10px] font-mono uppercase tracking-[0.2em] text-neutral-500 mb-3">Recent clones</h2>
           <div className="space-y-2">
             {history.map((clone) => (
               <div
                 key={clone.id}
-                className={`flex items-center gap-3 px-4 py-3 rounded-lg border border-zinc-800 bg-zinc-900/50 transition-colors group ${
-                  clone.status === "done" ? "hover:bg-zinc-900" : "opacity-60"
+                className={`flex items-center gap-3 px-4 py-3 rounded-lg border border-neutral-800 bg-surface-1/50 transition-colors group ${
+                  clone.status === "done" ? "hover:border-neutral-600" : "opacity-60"
                 }`}
               >
                 <button
@@ -653,12 +720,12 @@ export default function Home() {
                   }`}
                 >
                   <div className={`w-2 h-2 rounded-full shrink-0 ${
-                    clone.status === "done" ? "bg-emerald-500" :
-                    clone.status === "error" ? "bg-red-500" :
+                    clone.status === "done" ? "bg-accent" :
+                    clone.status === "error" ? "bg-error" :
                     "bg-yellow-500 animate-pulse"
                   }`} />
-                  <span className="text-sm text-zinc-300 truncate flex-1">{clone.url}</span>
-                  <span className="text-xs text-zinc-600 shrink-0">
+                  <span className="text-sm font-mono text-neutral-300 truncate flex-1">{clone.url}</span>
+                  <span className="text-xs font-mono text-neutral-600 shrink-0">
                     {new Date(clone.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                   </span>
                 </button>
@@ -668,7 +735,7 @@ export default function Home() {
                       .then(() => setHistory((prev) => prev.filter((c) => c.id !== clone.id)))
                       .catch(() => {});
                   }}
-                  className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 transition-all shrink-0 p-1"
+                  className="opacity-0 group-hover:opacity-100 text-neutral-600 hover:text-error transition-all shrink-0 p-1"
                   title="Delete clone"
                 >
                   <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">

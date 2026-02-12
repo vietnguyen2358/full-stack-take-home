@@ -7,3 +7,4 @@ httpx
 daytona
 certifi
 supabase
+openai

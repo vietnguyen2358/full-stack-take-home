@@ -52,21 +52,29 @@ def _create_sandbox():
 async def deploy_to_sandbox(
     generated_files: dict[str, str],
     extra_deps: list[str],
+    sandbox: Any | None = None,
 ) -> tuple[Any | None, str]:
-    """Create sandbox, upload template + generated files, npm install.
+    """Upload template + generated files to sandbox and npm install.
+
+    Args:
+        generated_files: Dict of path->content for AI-generated files.
+        extra_deps: Additional npm packages requested by AI.
+        sandbox: Pre-created sandbox. If None, creates a new one.
 
     Returns:
         (sandbox, project_dir) — sandbox is None if DAYTONA_API_KEY not set.
     """
     project_dir = "/home/daytona/app"
 
-    sandbox_start = time.time()
-    sandbox = await asyncio.to_thread(_create_sandbox)
     if sandbox is None:
-        logger.warning("[deploy] DAYTONA_API_KEY not set — skipping deployment")
-        return None, project_dir
-
-    logger.info("[deploy] Sandbox created in %.1fs", time.time() - sandbox_start)
+        sandbox_start = time.time()
+        sandbox = await asyncio.to_thread(_create_sandbox)
+        if sandbox is None:
+            logger.warning("[deploy] DAYTONA_API_KEY not set — skipping deployment")
+            return None, project_dir
+        logger.info("[deploy] Sandbox created in %.1fs", time.time() - sandbox_start)
+    else:
+        logger.info("[deploy] Using pre-created sandbox")
 
     # Create all directories needed
     all_dirs = {"src/app/[...slug]", "src/lib"}

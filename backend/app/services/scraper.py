@@ -621,6 +621,7 @@ async def scrape_page(
     url: str,
     on_log: LogCallback,
     on_status: StatusCallback,
+    log_queue: list[str] | None = None,
 ) -> dict[str, Any]:
     """Scrape a URL using Playwright and return all extracted data.
 
@@ -628,19 +629,25 @@ async def scrape_page(
         url: The URL to scrape.
         on_log: Callback that formats a log message as an SSE event string.
         on_status: Callback that formats a status event string.
+        log_queue: Optional shared list; scraper appends progress messages here
+                   so the SSE generator can stream them in real time.
 
     Returns:
         Dict with keys: raw_html, html, computed_styles, structured_content,
         nav_structure, interactive_elements, font_data, image_urls,
         screenshots, scroll_positions, total_height.
-
-    Yields SSE events via on_log/on_status through the returned async generator.
     """
+    def _log(msg: str) -> None:
+        """Append a progress message for the frontend terminal."""
+        logger.info("[scrape] %s", msg)
+        if log_queue is not None:
+            log_queue.append(msg)
+
     result: dict[str, Any] = {}
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        logger.info("[scrape] Browser launched for %s", url)
+        _log(f"Browser launched for {url}")
         page = await browser.new_page(
             viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
             user_agent=(
@@ -651,11 +658,13 @@ async def scrape_page(
         )
 
         nav_start = time.time()
+        _log("Navigating to page...")
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
         await page.wait_for_timeout(3000)
-        logger.info("[scrape] Page loaded in %.1fs — %s", time.time() - nav_start, url)
+        _log(f"Page loaded in {time.time() - nav_start:.1f}s")
 
         # Scroll to bottom to trigger all lazy-loaded content
+        _log("Scrolling to trigger lazy-loaded content...")
         scroll_start = time.time()
         scroll_count = 0
         prev_height = 0
@@ -670,28 +679,32 @@ async def scrape_page(
         # Scroll back to top
         await page.evaluate("window.scrollTo(0, 0)")
         await page.wait_for_timeout(500)
-        logger.info("[scrape] Lazy-load scroll: %d scrolls in %.1fs, final height=%dpx", scroll_count, time.time() - scroll_start, prev_height)
+        _log(f"Scrolled {scroll_count}x in {time.time() - scroll_start:.1f}s — page height: {prev_height}px")
 
         # Capture HTML after all content is loaded
+        _log("Extracting HTML...")
         raw_html = await page.content()
 
         # Clean HTML
         clean_start = time.time()
         html = _clean_html(raw_html)
         reduction = 100 - len(html) * 100 // max(len(raw_html), 1)
-        logger.info("[scrape] HTML cleaned: %d → %d chars (%d%% reduction) in %.2fs", len(raw_html), len(html), reduction, time.time() - clean_start)
+        _log(f"HTML cleaned: {len(raw_html):,} → {len(html):,} chars ({reduction}% reduction)")
 
         # Extract computed styles
+        _log("Extracting computed styles...")
         computed_styles: dict = await page.evaluate(_JS_EXTRACT_STYLES)
-        logger.info("[scrape] Computed styles: %d fonts, %d CSS vars, bodyBg=%s", len(computed_styles.get("fonts", [])), len(computed_styles.get("cssVariables", {})), computed_styles.get("bodyBg", "n/a"))
+        _log(f"Styles: {len(computed_styles.get('fonts', []))} fonts, {len(computed_styles.get('cssVariables', {}))} CSS vars")
 
         # Extract structured content
+        _log("Extracting page content structure...")
         structured_content: list[dict] = await page.evaluate(
             _JS_EXTRACT_CONTENT, MAX_STRUCTURED_ELEMENTS
         )
-        logger.info("[scrape] Structured content: %d elements", len(structured_content))
+        _log(f"Found {len(structured_content)} content elements")
 
         # Trigger navigation dropdowns
+        _log("Probing navigation dropdowns...")
         try:
             await page.evaluate("window.scrollTo(0, 0)")
             await page.wait_for_timeout(300)
@@ -725,7 +738,7 @@ async def scrape_page(
                 except Exception:
                     continue
 
-            logger.info("[scrape] Triggered %d nav items for dropdown extraction", triggered_count)
+            _log(f"Triggered {triggered_count} nav items for dropdown extraction")
         except Exception as nav_err:
             logger.warning("[scrape] Nav trigger failed (non-fatal): %s", nav_err)
 
@@ -736,7 +749,7 @@ async def scrape_page(
             for nav in nav_structure
             for item in nav.get("items", [])
         )
-        logger.info("[scrape] Navigation: %d nav(s), %d dropdown items", len(nav_structure), total_dropdown_items)
+        _log(f"Navigation: {len(nav_structure)} nav(s), {total_dropdown_items} dropdown items")
 
         # Close open dropdowns and reset page state
         try:
@@ -749,21 +762,23 @@ async def scrape_page(
             pass
 
         # Extract interactive elements
+        _log("Extracting interactive elements...")
         interactive_elements: list[dict] = await page.evaluate(_JS_EXTRACT_INTERACTIVE)
         total_slides = sum(el.get("slideCount", 0) for el in interactive_elements)
-        logger.info("[scrape] Interactive elements: %d groups, %d total slides", len(interactive_elements), total_slides)
+        _log(f"Interactive: {len(interactive_elements)} groups, {total_slides} slides")
 
         # Extract font URLs
         font_data: dict = await page.evaluate(_JS_EXTRACT_FONTS)
         google_font_count = len(font_data.get("googleFontLinks", []))
         font_face_count = len(font_data.get("fontFaceRules", []))
-        logger.info("[scrape] Fonts: %d Google Font links, %d @font-face rules", google_font_count, font_face_count)
+        _log(f"Fonts: {google_font_count} Google Font links, {font_face_count} @font-face rules")
 
         # Extract image URLs
         image_urls: list[dict] = await page.evaluate(_JS_EXTRACT_IMAGES, MAX_IMAGE_URLS)
-        logger.info("[scrape] Found %d image URLs", len(image_urls))
+        _log(f"Found {len(image_urls)} image URLs")
 
         # Take screenshots
+        _log("Capturing screenshots...")
         total_height = await page.evaluate("document.body.scrollHeight")
         screenshots: list[str] = []
         scroll_positions: list[int] = []
@@ -778,7 +793,7 @@ async def scrape_page(
 
         await browser.close()
         screenshot_bytes = sum(len(s) for s in screenshots)
-        logger.info("[scrape] COMPLETE — %d screenshots (%.1fMB base64), %d images, page height=%dpx", len(screenshots), screenshot_bytes / 1_048_576, len(image_urls), total_height)
+        _log(f"Captured {len(screenshots)} screenshots ({screenshot_bytes / 1_048_576:.1f}MB), page height={total_height}px")
 
     return {
         "raw_html": raw_html,

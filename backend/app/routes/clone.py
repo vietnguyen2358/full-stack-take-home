@@ -99,15 +99,35 @@ async def clone_website(req: CloneRequest):
 
     async def event_stream():
         try:
-            # ── SCRAPING ──────────────────────────────────────────
+            # ── SCRAPING + SANDBOX CREATION (parallel) ────────────
             scrape_start = time.time()
             yield _status("scraping", "Scraping website...")
             yield _log(f"Target URL: {url_str}")
-            yield _log("Launching headless browser (Chromium)...")
+            yield _log("Launching headless browser + pre-creating sandbox...")
             await asyncio.sleep(0)
 
+            # Start sandbox creation in background while scraping runs
+            sandbox_task = asyncio.create_task(asyncio.to_thread(_create_sandbox))
+
+            # Shared log queue — scraper appends messages, we drain as SSE
+            scrape_logs: list[str] = []
+
             try:
-                scrape_data = await scrape_page(url_str, on_log=_log, on_status=_status)
+                scrape_task = asyncio.create_task(
+                    scrape_page(url_str, on_log=_log, on_status=_status, log_queue=scrape_logs)
+                )
+
+                # Poll for scraper progress until done
+                while not scrape_task.done():
+                    await asyncio.sleep(0.3)
+                    while scrape_logs:
+                        yield _log(scrape_logs.pop(0))
+
+                scrape_data = scrape_task.result()
+
+                # Drain remaining logs
+                while scrape_logs:
+                    yield _log(scrape_logs.pop(0))
 
                 scrape_elapsed = time.time() - scrape_start
                 screenshots = scrape_data["screenshots"]
@@ -120,6 +140,7 @@ async def clone_website(req: CloneRequest):
                 _db_update_clone(clone_id, status="generating", screenshot_count=len(screenshots), image_count=len(image_urls), html_raw_size=len(raw_html), html_cleaned_size=len(html))
             except Exception as e:
                 logger.error("[scrape] FAILED for %s: %s\n%s", url_str, e, traceback.format_exc())
+                sandbox_task.cancel()
                 _db_update_clone(clone_id, status="error", error_message=f"Scrape failed: {e}")
                 raise HTTPException(status_code=422, detail=f"Failed to scrape page: {e}")
 
@@ -132,6 +153,7 @@ async def clone_website(req: CloneRequest):
             api_key = os.environ.get("OPENROUTER_API_KEY")
             if not api_key:
                 logger.error("[generate] OPENROUTER_API_KEY is not set")
+                sandbox_task.cancel()
                 raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY is not set")
 
             yield _log("Sending request to claude-sonnet-4.5 via OpenRouter...")
@@ -141,6 +163,7 @@ async def clone_website(req: CloneRequest):
                 generated_files, extra_deps, content = await generate_clone(scrape_data, api_key)
             except Exception as e:
                 logger.error("[generate] AI call failed: %s", e)
+                sandbox_task.cancel()
                 raise HTTPException(status_code=502, detail=f"AI generation failed: {e}")
 
             generated_code = generated_files.get("src/app/page.tsx", "")
@@ -154,18 +177,23 @@ async def clone_website(req: CloneRequest):
 
             # ── DEPLOYING ─────────────────────────────────────────
             deploy_start = time.time()
-            yield _status("deploying", "Creating sandbox...")
-            yield _log("Creating Daytona sandbox (node:20)...")
+            yield _status("deploying", "Preparing sandbox...")
             await asyncio.sleep(0)
 
             preview_url = None
             try:
-                sandbox, project_dir = await deploy_to_sandbox(generated_files, extra_deps)
+                # Await the pre-created sandbox (should already be done by now)
+                sandbox = await sandbox_task
+                if sandbox is not None:
+                    sandbox_elapsed = time.time() - scrape_start
+                    yield _log(f"Sandbox ready (pre-created during scrape/generate, {sandbox_elapsed:.1f}s ago)")
+
+                sandbox, project_dir = await deploy_to_sandbox(generated_files, extra_deps, sandbox=sandbox)
 
                 if sandbox is None:
                     yield _log("DAYTONA_API_KEY not set — skipping deployment")
                 else:
-                    yield _log("Sandbox created, files uploaded, dependencies installed")
+                    yield _log("Files uploaded, dependencies installed")
 
                     # ── BUILD CHECK WITH RETRY ────────────────────────
                     yield _status("deploying", "Building project...")

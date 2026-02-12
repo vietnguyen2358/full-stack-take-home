@@ -180,7 +180,7 @@ function TerminalLog({
         <span className="text-[10px] font-mono uppercase tracking-widest text-neutral-500 ml-2">Activity</span>
         <span className="text-[10px] font-mono text-neutral-600 ml-auto">{count} events</span>
       </div>
-      <div className="max-h-52 overflow-y-auto p-3 space-y-0.5">
+      <div className="max-h-48 overflow-y-auto p-3 space-y-0.5">
         {logs.map((log, i) => (
           <p key={i} className="text-xs font-mono leading-relaxed text-neutral-500">
             <span className="text-neutral-700 select-none mr-2">{String(i + 1).padStart(2, "0")}</span>
@@ -295,8 +295,15 @@ export default function Home() {
               .then((data) => { if (data.clones) setHistory(data.clones); })
               .catch(() => {});
           } else if (payload.status) {
+            if (payload.message) {
+              setLogs((prev) => [...prev, `▸ ${payload.message}`]);
+            }
             setPhase(payload.status);
             if (payload.message) setStatusMessage(payload.message);
+          }
+
+          if (payload.type === "file_write") {
+            setLogs((prev) => [...prev, `  + ${payload.file} (${payload.lines} lines)`]);
           }
         }
       }

@@ -1,0 +1,691 @@
+{
+  "design_tokens": {
+    "colors": {
+      "light": {
+        "background": "hsl(0 0% 100%)",
+        "foreground": "hsl(222.2 84% 4.9%)",
+        "card": "hsl(0 0% 100%)",
+        "card-foreground": "hsl(222.2 84% 4.9%)",
+        "popover": "hsl(0 0% 100%)",
+        "popover-foreground": "hsl(222.2 84% 4.9%)",
+        "primary": "hsl(222.2 47.4% 11.2%)",
+        "primary-foreground": "hsl(210 40% 98%)",
+        "secondary": "hsl(210 40% 96.1%)",
+        "secondary-foreground": "hsl(222.2 47.4% 11.2%)",
+        "muted": "hsl(210 40% 96.1%)",
+        "muted-foreground": "hsl(215.4 16.3% 46.9%)",
+        "accent": "hsl(210 40% 96.1%)",
+        "accent-foreground": "hsl(222.2 47.4% 11.2%)",
+        "destructive": "hsl(0 84.2% 60.2%)",
+        "destructive-foreground": "hsl(210 40% 98%)",
+        "border": "hsl(214.3 31.8% 91.4%)",
+        "input": "hsl(214.3 31.8% 91.4%)",
+        "ring": "hsl(222.2 84% 4.9%)"
+      },
+      "dark": {
+        "background": "hsl(222.2 84% 4.9%)",
+        "foreground": "hsl(210 40% 98%)",
+        "card": "hsl(222.2 84% 4.9%)",
+        "card-foreground": "hsl(210 40% 98%)",
+        "popover": "hsl(222.2 84% 4.9%)",
+        "popover-foreground": "hsl(210 40% 98%)",
+        "primary": "hsl(210 40% 98%)",
+        "primary-foreground": "hsl(222.2 47.4% 11.2%)",
+        "secondary": "hsl(217.2 32.6% 17.5%)",
+        "secondary-foreground": "hsl(210 40% 98%)",
+        "muted": "hsl(217.2 32.6% 17.5%)",
+        "muted-foreground": "hsl(215 20.2% 65.1%)",
+        "accent": "hsl(217.2 32.6% 17.5%)",
+        "accent-foreground": "hsl(210 40% 98%)",
+        "destructive": "hsl(0 62.8% 30.6%)",
+        "destructive-foreground": "hsl(210 40% 98%)",
+        "border": "hsl(217.2 32.6% 17.5%)",
+        "input": "hsl(217.2 32.6% 17.5%)",
+        "ring": "hsl(212.7 26.8% 83.9%)"
+      }
+    },
+    "typography": {
+      "font_family": "Inter, system-ui, -apple-system, sans-serif",
+      "font_sizes": {
+        "xs": "0.75rem",
+        "sm": "0.875rem",
+        "base": "1rem",
+        "lg": "1.125rem",
+        "xl": "1.25rem",
+        "2xl": "1.5rem",
+        "3xl": "1.875rem",
+        "4xl": "2.25rem"
+      },
+      "font_weights": {
+        "normal": "400",
+        "medium": "500",
+        "semibold": "600",
+        "bold": "700"
+      },
+      "line_heights": {
+        "tight": "1.25",
+        "normal": "1.5",
+        "relaxed": "1.75"
+      }
+    },
+    "spacing": {
+      "0": "0",
+      "1": "0.25rem",
+      "2": "0.5rem",
+      "3": "0.75rem",
+      "4": "1rem",
+      "5": "1.25rem",
+      "6": "1.5rem",
+      "8": "2rem",
+      "10": "2.5rem",
+      "12": "3rem",
+      "16": "4rem"
+    },
+    "border_radius": {
+      "none": "0",
+      "sm": "0.125rem",
+      "default": "0.25rem",
+      "md": "0.375rem",
+      "lg": "0.5rem",
+      "xl": "0.75rem",
+      "2xl": "1rem",
+      "full": "9999px"
+    }
+  },
+  "components": [
+    {
+      "name": "button",
+      "description": "A clickable button element with multiple variants and sizes",
+      "html_pattern": "<button class=\"{classes}\">{children}</button>",
+      "variants": {
+        "default": "bg-primary text-primary-foreground hover:bg-primary/90",
+        "destructive": "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+        "outline": "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
+        "secondary": "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        "ghost": "hover:bg-accent hover:text-accent-foreground",
+        "link": "text-primary underline-offset-4 hover:underline"
+      },
+      "sizes": {
+        "default": "h-10 px-4 py-2",
+        "sm": "h-9 rounded-md px-3",
+        "lg": "h-11 rounded-md px-8",
+        "icon": "h-10 w-10"
+      },
+      "base_classes": "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+    },
+    {
+      "name": "card",
+      "description": "A container component for grouping related content with header, content, and footer sections",
+      "html_pattern": "<div class=\"{classes}\">{children}</div>",
+      "variants": {
+        "default": "bg-card text-card-foreground"
+      },
+      "base_classes": "rounded-lg border bg-card text-card-foreground shadow-sm",
+      "sub_components": {
+        "header": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "flex flex-col space-y-1.5 p-6"
+        },
+        "title": {
+          "html_pattern": "<h3 class=\"{classes}\">{children}</h3>",
+          "base_classes": "text-2xl font-semibold leading-none tracking-tight"
+        },
+        "description": {
+          "html_pattern": "<p class=\"{classes}\">{children}</p>",
+          "base_classes": "text-sm text-muted-foreground"
+        },
+        "content": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "p-6 pt-0"
+        },
+        "footer": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "flex items-center p-6 pt-0"
+        }
+      }
+    },
+    {
+      "name": "input",
+      "description": "A text input field for forms and user input",
+      "html_pattern": "<input class=\"{classes}\" type=\"{type}\" placeholder=\"{placeholder}\" />",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+    },
+    {
+      "name": "badge",
+      "description": "A small status indicator or label",
+      "html_pattern": "<div class=\"{classes}\">{children}</div>",
+      "variants": {
+        "default": "border-transparent bg-primary text-primary-foreground hover:bg-primary/80",
+        "secondary": "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        "destructive": "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
+        "outline": "text-foreground"
+      },
+      "base_classes": "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+    },
+    {
+      "name": "avatar",
+      "description": "A circular image element for user profile pictures",
+      "html_pattern": "<span class=\"{classes}\">{children}</span>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "relative flex h-10 w-10 shrink-0 overflow-hidden rounded-full",
+      "sub_components": {
+        "image": {
+          "html_pattern": "<img class=\"{classes}\" src=\"{src}\" alt=\"{alt}\" />",
+          "base_classes": "aspect-square h-full w-full"
+        },
+        "fallback": {
+          "html_pattern": "<span class=\"{classes}\">{children}</span>",
+          "base_classes": "flex h-full w-full items-center justify-center rounded-full bg-muted"
+        }
+      }
+    },
+    {
+      "name": "separator",
+      "description": "A visual divider between content sections",
+      "html_pattern": "<div class=\"{classes}\" role=\"separator\"></div>",
+      "variants": {
+        "horizontal": "h-[1px] w-full",
+        "vertical": "h-full w-[1px]"
+      },
+      "base_classes": "shrink-0 bg-border"
+    },
+    {
+      "name": "skeleton",
+      "description": "A placeholder loading animation for content that is being loaded",
+      "html_pattern": "<div class=\"{classes}\"></div>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "animate-pulse rounded-md bg-muted"
+    },
+    {
+      "name": "alert",
+      "description": "A callout component for displaying important messages",
+      "html_pattern": "<div class=\"{classes}\" role=\"alert\">{children}</div>",
+      "variants": {
+        "default": "bg-background text-foreground",
+        "destructive": "border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive"
+      },
+      "base_classes": "relative w-full rounded-lg border p-4 [&>svg~*]:pl-7 [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-foreground",
+      "sub_components": {
+        "title": {
+          "html_pattern": "<h5 class=\"{classes}\">{children}</h5>",
+          "base_classes": "mb-1 font-medium leading-none tracking-tight"
+        },
+        "description": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "text-sm [&_p]:leading-relaxed"
+        }
+      }
+    },
+    {
+      "name": "table",
+      "description": "A data table component for displaying tabular data",
+      "html_pattern": "<div class=\"relative w-full overflow-auto\"><table class=\"{classes}\">{children}</table></div>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "w-full caption-bottom text-sm",
+      "sub_components": {
+        "header": {
+          "html_pattern": "<thead class=\"{classes}\">{children}</thead>",
+          "base_classes": "[&_tr]:border-b"
+        },
+        "body": {
+          "html_pattern": "<tbody class=\"{classes}\">{children}</tbody>",
+          "base_classes": "[&_tr:last-child]:border-0"
+        },
+        "row": {
+          "html_pattern": "<tr class=\"{classes}\">{children}</tr>",
+          "base_classes": "border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
+        },
+        "head": {
+          "html_pattern": "<th class=\"{classes}\">{children}</th>",
+          "base_classes": "h-12 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0"
+        },
+        "cell": {
+          "html_pattern": "<td class=\"{classes}\">{children}</td>",
+          "base_classes": "p-4 align-middle [&:has([role=checkbox])]:pr-0"
+        },
+        "caption": {
+          "html_pattern": "<caption class=\"{classes}\">{children}</caption>",
+          "base_classes": "mt-4 text-sm text-muted-foreground"
+        }
+      }
+    },
+    {
+      "name": "tabs",
+      "description": "A tabbed navigation component for switching between content panels",
+      "html_pattern": "<div class=\"{classes}\">{children}</div>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "",
+      "sub_components": {
+        "list": {
+          "html_pattern": "<div class=\"{classes}\" role=\"tablist\">{children}</div>",
+          "base_classes": "inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground"
+        },
+        "trigger": {
+          "html_pattern": "<button class=\"{classes}\" role=\"tab\">{children}</button>",
+          "base_classes": "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+        },
+        "content": {
+          "html_pattern": "<div class=\"{classes}\" role=\"tabpanel\">{children}</div>",
+          "base_classes": "mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        }
+      }
+    },
+    {
+      "name": "dialog",
+      "description": "A modal dialog overlay for focused user interactions",
+      "html_pattern": "<div class=\"{classes}\" role=\"dialog\">{children}</div>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "fixed inset-0 z-50",
+      "sub_components": {
+        "overlay": {
+          "html_pattern": "<div class=\"{classes}\"></div>",
+          "base_classes": "fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
+        },
+        "content": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg"
+        },
+        "header": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "flex flex-col space-y-1.5 text-center sm:text-left"
+        },
+        "footer": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2"
+        },
+        "title": {
+          "html_pattern": "<h2 class=\"{classes}\">{children}</h2>",
+          "base_classes": "text-lg font-semibold leading-none tracking-tight"
+        },
+        "description": {
+          "html_pattern": "<p class=\"{classes}\">{children}</p>",
+          "base_classes": "text-sm text-muted-foreground"
+        }
+      }
+    },
+    {
+      "name": "dropdown_menu",
+      "description": "A dropdown menu triggered by a button click",
+      "html_pattern": "<div class=\"{classes}\">{children}</div>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "relative",
+      "sub_components": {
+        "trigger": {
+          "html_pattern": "<button class=\"{classes}\">{children}</button>",
+          "base_classes": "flex cursor-default select-none items-center"
+        },
+        "content": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2"
+        },
+        "item": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+        },
+        "separator": {
+          "html_pattern": "<div class=\"{classes}\"></div>",
+          "base_classes": "-mx-1 my-1 h-px bg-muted"
+        },
+        "label": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "px-2 py-1.5 text-sm font-semibold"
+        }
+      }
+    },
+    {
+      "name": "navigation_menu",
+      "description": "A top-level navigation component with dropdown support",
+      "html_pattern": "<nav class=\"{classes}\">{children}</nav>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "relative z-10 flex max-w-max flex-1 items-center justify-center",
+      "sub_components": {
+        "list": {
+          "html_pattern": "<ul class=\"{classes}\">{children}</ul>",
+          "base_classes": "group flex flex-1 list-none items-center justify-center space-x-1"
+        },
+        "item": {
+          "html_pattern": "<li class=\"{classes}\">{children}</li>",
+          "base_classes": ""
+        },
+        "trigger": {
+          "html_pattern": "<button class=\"{classes}\">{children}</button>",
+          "base_classes": "group inline-flex h-10 w-max items-center justify-center rounded-md bg-background px-4 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50 data-[active]:bg-accent/50 data-[state=open]:bg-accent/50"
+        },
+        "content": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "left-0 top-0 w-full data-[motion^=from-]:animate-in data-[motion^=to-]:animate-out data-[motion^=from-]:fade-in data-[motion^=to-]:fade-out data-[motion=from-end]:slide-in-from-right-52 data-[motion=from-start]:slide-in-from-left-52 data-[motion=to-end]:slide-out-to-right-52 data-[motion=to-start]:slide-out-to-left-52 md:absolute md:w-auto"
+        },
+        "link": {
+          "html_pattern": "<a class=\"{classes}\" href=\"{href}\">{children}</a>",
+          "base_classes": "block select-none space-y-1 rounded-md p-3 leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
+        }
+      }
+    },
+    {
+      "name": "toast",
+      "description": "A temporary notification message that appears briefly",
+      "html_pattern": "<div class=\"{classes}\">{children}</div>",
+      "variants": {
+        "default": "border bg-background text-foreground",
+        "destructive": "destructive group border-destructive bg-destructive text-destructive-foreground"
+      },
+      "base_classes": "group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-md border p-6 pr-8 shadow-lg transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-top-full data-[state=open]:sm:slide-in-from-bottom-full",
+      "sub_components": {
+        "title": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "text-sm font-semibold"
+        },
+        "description": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "text-sm opacity-90"
+        },
+        "action": {
+          "html_pattern": "<button class=\"{classes}\">{children}</button>",
+          "base_classes": "inline-flex h-8 shrink-0 items-center justify-center rounded-md border bg-transparent px-3 text-sm font-medium ring-offset-background transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 group-[.destructive]:border-muted/40 group-[.destructive]:hover:border-destructive/30 group-[.destructive]:hover:bg-destructive group-[.destructive]:hover:text-destructive-foreground group-[.destructive]:focus:ring-destructive"
+        },
+        "close": {
+          "html_pattern": "<button class=\"{classes}\">{children}</button>",
+          "base_classes": "absolute right-2 top-2 rounded-md p-1 text-foreground/50 opacity-0 transition-opacity hover:text-foreground focus:opacity-100 focus:outline-none focus:ring-2 group-hover:opacity-100 group-[.destructive]:text-red-300 group-[.destructive]:hover:text-red-50 group-[.destructive]:focus:ring-red-400 group-[.destructive]:focus:ring-offset-red-600"
+        }
+      }
+    },
+    {
+      "name": "select",
+      "description": "A dropdown select component for choosing from a list of options",
+      "html_pattern": "<div class=\"{classes}\">{children}</div>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "relative",
+      "sub_components": {
+        "trigger": {
+          "html_pattern": "<button class=\"{classes}\">{children}</button>",
+          "base_classes": "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1"
+        },
+        "content": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2"
+        },
+        "item": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+        },
+        "separator": {
+          "html_pattern": "<div class=\"{classes}\"></div>",
+          "base_classes": "-mx-1 my-1 h-px bg-muted"
+        },
+        "label": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "py-1.5 pl-8 pr-2 text-sm font-semibold"
+        }
+      }
+    },
+    {
+      "name": "textarea",
+      "description": "A multi-line text input field",
+      "html_pattern": "<textarea class=\"{classes}\" placeholder=\"{placeholder}\"></textarea>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+    },
+    {
+      "name": "switch",
+      "description": "A toggle switch for boolean on/off states",
+      "html_pattern": "<button class=\"{classes}\" role=\"switch\" aria-checked=\"{checked}\">{children}</button>",
+      "variants": {
+        "default": "data-[state=checked]:bg-primary data-[state=unchecked]:bg-input"
+      },
+      "base_classes": "peer inline-flex h-[24px] w-[44px] shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
+    },
+    {
+      "name": "progress",
+      "description": "A progress bar indicating completion status",
+      "html_pattern": "<div class=\"{classes}\" role=\"progressbar\">{children}</div>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "relative h-4 w-full overflow-hidden rounded-full bg-secondary",
+      "sub_components": {
+        "indicator": {
+          "html_pattern": "<div class=\"{classes}\" style=\"transform: translateX(-{remaining}%)\"></div>",
+          "base_classes": "h-full w-full flex-1 bg-primary transition-all"
+        }
+      }
+    },
+    {
+      "name": "accordion",
+      "description": "A vertically stacked set of expandable/collapsible content sections",
+      "html_pattern": "<div class=\"{classes}\">{children}</div>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "w-full",
+      "sub_components": {
+        "item": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "border-b"
+        },
+        "trigger": {
+          "html_pattern": "<button class=\"{classes}\">{children}</button>",
+          "base_classes": "flex flex-1 items-center justify-between py-4 font-medium transition-all hover:underline [&[data-state=open]>svg]:rotate-180"
+        },
+        "content": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "overflow-hidden text-sm transition-all data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down"
+        }
+      }
+    },
+    {
+      "name": "tooltip",
+      "description": "A popup element that displays information on hover",
+      "html_pattern": "<div class=\"{classes}\">{children}</div>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "",
+      "sub_components": {
+        "trigger": {
+          "html_pattern": "<button class=\"{classes}\">{children}</button>",
+          "base_classes": ""
+        },
+        "content": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "z-50 overflow-hidden rounded-md border bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2"
+        }
+      }
+    },
+    {
+      "name": "popover",
+      "description": "A floating content panel that appears relative to a trigger element",
+      "html_pattern": "<div class=\"{classes}\">{children}</div>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "relative",
+      "sub_components": {
+        "trigger": {
+          "html_pattern": "<button class=\"{classes}\">{children}</button>",
+          "base_classes": ""
+        },
+        "content": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "z-50 w-72 rounded-md border bg-popover p-4 text-popover-foreground shadow-md outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2"
+        }
+      }
+    },
+    {
+      "name": "checkbox",
+      "description": "A checkable input element for boolean selections",
+      "html_pattern": "<button class=\"{classes}\" role=\"checkbox\" aria-checked=\"{checked}\">{children}</button>",
+      "variants": {
+        "default": "data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground"
+      },
+      "base_classes": "peer h-4 w-4 shrink-0 rounded-sm border border-primary ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+    },
+    {
+      "name": "radio_group",
+      "description": "A set of mutually exclusive radio button options",
+      "html_pattern": "<div class=\"{classes}\" role=\"radiogroup\">{children}</div>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "grid gap-2",
+      "sub_components": {
+        "item": {
+          "html_pattern": "<button class=\"{classes}\" role=\"radio\">{children}</button>",
+          "base_classes": "aspect-square h-4 w-4 rounded-full border border-primary text-primary ring-offset-background focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+        }
+      }
+    },
+    {
+      "name": "label",
+      "description": "A text label element associated with form controls",
+      "html_pattern": "<label class=\"{classes}\">{children}</label>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+    },
+    {
+      "name": "scroll_area",
+      "description": "A scrollable container with custom scrollbar styling",
+      "html_pattern": "<div class=\"{classes}\">{children}</div>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "relative overflow-hidden",
+      "sub_components": {
+        "viewport": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "h-full w-full rounded-[inherit]"
+        },
+        "scrollbar": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "flex touch-none select-none transition-colors"
+        },
+        "thumb": {
+          "html_pattern": "<div class=\"{classes}\"></div>",
+          "base_classes": "relative flex-1 rounded-full bg-border"
+        }
+      }
+    },
+    {
+      "name": "sheet",
+      "description": "A sliding panel overlay from the edge of the screen",
+      "html_pattern": "<div class=\"{classes}\" role=\"dialog\">{children}</div>",
+      "variants": {
+        "top": "inset-x-0 top-0 border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
+        "bottom": "inset-x-0 bottom-0 border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
+        "left": "inset-y-0 left-0 h-full w-3/4 border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:max-w-sm",
+        "right": "inset-y-0 right-0 h-full w-3/4 border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sm"
+      },
+      "base_classes": "fixed z-50 gap-4 bg-background p-6 shadow-lg transition ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:duration-500",
+      "sub_components": {
+        "overlay": {
+          "html_pattern": "<div class=\"{classes}\"></div>",
+          "base_classes": "fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
+        },
+        "header": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "flex flex-col space-y-2 text-center sm:text-left"
+        },
+        "footer": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2"
+        },
+        "title": {
+          "html_pattern": "<h2 class=\"{classes}\">{children}</h2>",
+          "base_classes": "text-lg font-semibold text-foreground"
+        },
+        "description": {
+          "html_pattern": "<p class=\"{classes}\">{children}</p>",
+          "base_classes": "text-sm text-muted-foreground"
+        }
+      }
+    },
+    {
+      "name": "aspect_ratio",
+      "description": "A container that maintains a specific width-to-height ratio",
+      "html_pattern": "<div class=\"{classes}\" style=\"position: relative; width: 100%; padding-bottom: {ratio}%;\">{children}</div>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "relative"
+    },
+    {
+      "name": "collapsible",
+      "description": "An expandable/collapsible content section",
+      "html_pattern": "<div class=\"{classes}\">{children}</div>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "",
+      "sub_components": {
+        "trigger": {
+          "html_pattern": "<button class=\"{classes}\">{children}</button>",
+          "base_classes": ""
+        },
+        "content": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "overflow-hidden transition-all data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down"
+        }
+      }
+    },
+    {
+      "name": "toggle",
+      "description": "A two-state toggle button",
+      "html_pattern": "<button class=\"{classes}\" aria-pressed=\"{pressed}\">{children}</button>",
+      "variants": {
+        "default": "bg-transparent",
+        "outline": "border border-input bg-transparent hover:bg-accent hover:text-accent-foreground"
+      },
+      "sizes": {
+        "default": "h-10 px-3",
+        "sm": "h-9 px-2.5",
+        "lg": "h-11 px-5"
+      },
+      "base_classes": "inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors hover:bg-muted hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=on]:bg-accent data-[state=on]:text-accent-foreground"
+    },
+    {
+      "name": "slider",
+      "description": "A range input slider for selecting numeric values",
+      "html_pattern": "<div class=\"{classes}\">{children}</div>",
+      "variants": {
+        "default": ""
+      },
+      "base_classes": "relative flex w-full touch-none select-none items-center",
+      "sub_components": {
+        "track": {
+          "html_pattern": "<div class=\"{classes}\">{children}</div>",
+          "base_classes": "relative h-2 w-full grow overflow-hidden rounded-full bg-secondary"
+        },
+        "range": {
+          "html_pattern": "<div class=\"{classes}\"></div>",
+          "base_classes": "absolute h-full bg-primary"
+        },
+        "thumb": {
+          "html_pattern": "<div class=\"{classes}\"></div>",
+          "base_classes": "block h-5 w-5 rounded-full border-2 border-primary bg-background ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+        }
+      }
+    }
+  ]
+}

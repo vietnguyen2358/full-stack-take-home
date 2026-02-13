@@ -569,63 +569,81 @@ export default function Home() {
             />
           ) : staticHtml ? (
             <div className={`flex-1 flex flex-col w-full ${tab !== "preview" ? "hidden" : ""}`}>
-              <iframe
-                srcDoc={staticHtml}
-                sandbox="allow-scripts allow-same-origin"
-                className="flex-1 w-full border-none bg-white"
-                title="Static preview"
-              />
-              {cloneId && (
-                <div className="flex items-center gap-3 px-4 py-2 bg-surface-1 border-t border-neutral-800">
-                  <span className="text-xs font-mono text-neutral-500">Static preview</span>
-                  <button
-                    onClick={handleRedeploy}
-                    disabled={redeploying}
-                    className="text-xs font-mono text-accent hover:underline disabled:opacity-50"
-                  >
-                    {redeploying ? "Deploying..." : "Launch live sandbox"}
-                  </button>
-                  {redeploying && redeployLogs.length > 0 && (
-                    <span className="text-xs font-mono text-neutral-500 truncate flex-1">
-                      {redeployLogs[redeployLogs.length - 1]}
-                    </span>
-                  )}
+              {redeploying ? (
+                <div className="flex-1 flex items-center justify-center bg-surface-0">
+                  <div className="w-full max-w-2xl flex flex-col items-center gap-6 px-4">
+                    <div className="flex flex-col items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-accent animate-[glow-pulse_2s_ease-in-out_infinite]" />
+                        <span className="text-[10px] font-mono uppercase tracking-widest text-accent">Deploy</span>
+                      </div>
+                      <p className="text-sm font-mono text-neutral-300">
+                        {redeployLogs.length > 0 ? redeployLogs[redeployLogs.length - 1] : "Re-deploying to sandbox..."}
+                      </p>
+                    </div>
+                    {redeployLogs.length > 0 && (
+                      <TerminalLog logs={redeployLogs} />
+                    )}
+                  </div>
                 </div>
+              ) : (
+                <>
+                  <iframe
+                    srcDoc={staticHtml}
+                    sandbox="allow-scripts allow-same-origin"
+                    className="flex-1 w-full border-none bg-white"
+                    title="Static preview"
+                  />
+                  {cloneId && (
+                    <div className="flex items-center gap-3 px-4 py-2 bg-surface-1 border-t border-neutral-800">
+                      <span className="text-xs font-mono text-neutral-500">Static preview</span>
+                      <button
+                        onClick={handleRedeploy}
+                        className="text-xs font-mono text-accent hover:underline"
+                      >
+                        Launch live sandbox
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           ) : (
             tab === "preview" && (
               <div className="flex-1 flex items-center justify-center bg-surface-0">
-                <div className="text-center space-y-4">
-                  {redeploying ? (
-                    <div className="w-full max-w-2xl mx-auto flex flex-col items-center gap-6 px-4">
-                      <div className="flex flex-col items-center gap-3">
-                        <ArcSpinner />
-                        <p className="text-sm font-mono text-neutral-50">Re-deploying to sandbox...</p>
+                {redeploying ? (
+                  <div className="w-full max-w-2xl flex flex-col items-center gap-6 px-4">
+                    <div className="flex flex-col items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-accent animate-[glow-pulse_2s_ease-in-out_infinite]" />
+                        <span className="text-[10px] font-mono uppercase tracking-widest text-accent">Deploy</span>
                       </div>
-                      {redeployLogs.length > 0 && (
-                        <TerminalLog logs={redeployLogs} />
-                      )}
+                      <p className="text-sm font-mono text-neutral-300">
+                        {redeployLogs.length > 0 ? redeployLogs[redeployLogs.length - 1] : "Deploying to sandbox..."}
+                      </p>
                     </div>
-                  ) : (
-                    <>
-                      <p className="text-neutral-400 text-sm font-mono">
-                        No preview available.
-                      </p>
-                      {cloneId && (
-                        <button
-                          onClick={handleRedeploy}
-                          className="px-4 py-2 rounded-lg bg-accent text-surface-0 text-sm font-mono font-semibold hover:brightness-110 transition-all"
-                        >
-                          Deploy to sandbox
-                        </button>
-                      )}
-                      <p className="text-neutral-500 text-xs font-mono">
-                        Or switch to the Code tab to view the source.
-                      </p>
-                    </>
-                  )}
-                </div>
+                    {redeployLogs.length > 0 && (
+                      <TerminalLog logs={redeployLogs} />
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center space-y-4">
+                    <p className="text-neutral-400 text-sm font-mono">
+                      No preview available.
+                    </p>
+                    {cloneId && (
+                      <button
+                        onClick={handleRedeploy}
+                        className="px-4 py-2 rounded-lg bg-accent text-surface-0 text-sm font-mono font-semibold hover:brightness-110 transition-all"
+                      >
+                        Deploy to sandbox
+                      </button>
+                    )}
+                    <p className="text-neutral-500 text-xs font-mono">
+                      Or switch to the Code tab to view the source.
+                    </p>
+                  </div>
+                )}
               </div>
             )
           )}
@@ -860,21 +878,52 @@ export default function Home() {
                       .then((r) => r.json())
                       .then((data) => {
                         setUrl(data.url);
-                        setCode(data.generated_code || "");
+                        const pageCode = data.files?.["src/app/page.tsx"] || "";
+                        setCode(pageCode);
                         setFiles(data.files || {});
                         setCloneId(data.id);
-                        setTab("preview");
+                        setTab("code");
                         setPhase("done");
-
-                        // Use static HTML for history items, or show redeploy option
                         setPreviewUrl("");
                         if (data.static_html) {
                           setStaticHtml(data.static_html);
-                          setTab("preview");
                         } else {
                           setStaticHtml("");
-                          setTab("preview"); // will show redeploy button
                         }
+
+                        // Auto-start redeployment in background
+                        setRedeploying(true);
+                        setRedeployLogs([]);
+                        fetch(`${process.env.NEXT_PUBLIC_API_URL}/clones/${data.id}/redeploy`, { method: "POST" })
+                          .then(async (res) => {
+                            if (!res.ok) throw new Error(`Request failed (${res.status})`);
+                            const reader = res.body?.getReader();
+                            if (!reader) throw new Error("No response body");
+                            const decoder = new TextDecoder();
+                            let buf = "";
+                            while (true) {
+                              const { done, value } = await reader.read();
+                              if (done) break;
+                              buf += decoder.decode(value, { stream: true });
+                              const lines = buf.split("\n");
+                              buf = lines.pop() || "";
+                              for (const line of lines) {
+                                if (!line.startsWith("data: ")) continue;
+                                const payload = JSON.parse(line.slice(6));
+                                if (payload.log) setRedeployLogs((prev) => [...prev, payload.log]);
+                                if (payload.status === "done" && payload.preview_url) {
+                                  setPreviewUrl(payload.preview_url);
+                                }
+                                if (payload.status === "error") {
+                                  setRedeployLogs((prev) => [...prev, `Error: ${payload.message}`]);
+                                }
+                              }
+                            }
+                          })
+                          .catch((err) => {
+                            setRedeployLogs((prev) => [...prev, `Error: ${err instanceof Error ? err.message : "Failed"}`]);
+                          })
+                          .finally(() => setRedeploying(false));
                       })
                       .catch(() => {});
                   }}

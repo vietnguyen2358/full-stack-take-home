@@ -15,6 +15,7 @@ VIEWPORT_HEIGHT = 900
 MAX_SCREENSHOTS = 15
 MAX_IMAGE_URLS = 100
 MAX_STRUCTURED_ELEMENTS = 300
+STEP_TIMEOUT = 10  # Max seconds per JS evaluation step
 
 
 def _clean_html(html: str) -> str:
@@ -618,6 +619,19 @@ LogCallback = Callable[[str], str]
 StatusCallback = Callable[[str, str], str]
 
 
+async def _safe_evaluate(page, script, arg=None, timeout=STEP_TIMEOUT, default=None):
+    """Run page.evaluate with a hard timeout. Returns default on timeout/error."""
+    try:
+        coro = page.evaluate(script, arg) if arg is not None else page.evaluate(script)
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.warning("[scrape] JS evaluation timed out after %ds", timeout)
+        return default
+    except Exception as e:
+        logger.warning("[scrape] JS evaluation failed: %s", e)
+        return default
+
+
 async def scrape_page(
     url: str,
     on_log: LogCallback,
@@ -742,26 +756,29 @@ async def scrape_page(
 
         # Extract computed styles
         _log("Extracting computed styles...")
-        computed_styles: dict = await page.evaluate(_JS_EXTRACT_STYLES)
+        computed_styles: dict = await _safe_evaluate(page, _JS_EXTRACT_STYLES, default={})
         _log(f"Styles: {len(computed_styles.get('fonts', []))} fonts, {len(computed_styles.get('cssVariables', {}))} CSS vars")
 
         # Extract structured content
         _log("Extracting page content structure...")
-        structured_content: list[dict] = await page.evaluate(
-            _JS_EXTRACT_CONTENT, MAX_STRUCTURED_ELEMENTS
+        structured_content: list[dict] = await _safe_evaluate(
+            page, _JS_EXTRACT_CONTENT, arg=MAX_STRUCTURED_ELEMENTS, default=[]
         )
         _log(f"Found {len(structured_content)} content elements")
 
         # Trigger navigation dropdowns
         _log("Probing navigation dropdowns...")
         try:
-            await page.evaluate("window.scrollTo(0, 0)")
+            await asyncio.wait_for(page.evaluate("window.scrollTo(0, 0)"), timeout=5)
             await page.wait_for_timeout(300)
 
-            nav_triggers = await page.query_selector_all(
-                'nav a, nav button, header a, header button, '
-                '[role="navigation"] a, [role="navigation"] button, '
-                '[role="menuitem"], [aria-haspopup="true"], [aria-expanded]'
+            nav_triggers = await asyncio.wait_for(
+                page.query_selector_all(
+                    'nav a, nav button, header a, header button, '
+                    '[role="navigation"] a, [role="navigation"] button, '
+                    '[role="menuitem"], [aria-haspopup="true"], [aria-expanded]'
+                ),
+                timeout=5,
             )
             triggered_count = 0
             for trigger in nav_triggers[:20]:
@@ -788,11 +805,12 @@ async def scrape_page(
                     continue
 
             _log(f"Triggered {triggered_count} nav items for dropdown extraction")
-        except Exception as nav_err:
+        except (asyncio.TimeoutError, Exception) as nav_err:
+            _log("Nav probing timed out, skipping")
             logger.warning("[scrape] Nav trigger failed (non-fatal): %s", nav_err)
 
         # Extract navigation structure
-        nav_structure: list[dict] = await page.evaluate(_JS_EXTRACT_NAV)
+        nav_structure: list[dict] = await _safe_evaluate(page, _JS_EXTRACT_NAV, default=[])
         total_dropdown_items = sum(
             len(item.get("dropdown", []))
             for nav in nav_structure
@@ -802,7 +820,7 @@ async def scrape_page(
 
         # Close open dropdowns and reset page state
         try:
-            await page.evaluate("document.body.click()")
+            await asyncio.wait_for(page.evaluate("document.body.click()"), timeout=3)
             await page.keyboard.press("Escape")
             await page.wait_for_timeout(300)
             await page.evaluate("window.scrollTo(0, 0)")
@@ -812,32 +830,36 @@ async def scrape_page(
 
         # Extract interactive elements
         _log("Extracting interactive elements...")
-        interactive_elements: list[dict] = await page.evaluate(_JS_EXTRACT_INTERACTIVE)
+        interactive_elements: list[dict] = await _safe_evaluate(page, _JS_EXTRACT_INTERACTIVE, default=[])
         total_slides = sum(el.get("slideCount", 0) for el in interactive_elements)
         _log(f"Interactive: {len(interactive_elements)} groups, {total_slides} slides")
 
         # Extract font URLs
-        font_data: dict = await page.evaluate(_JS_EXTRACT_FONTS)
+        font_data: dict = await _safe_evaluate(page, _JS_EXTRACT_FONTS, default={"googleFontLinks": [], "fontFaceRules": []})
         google_font_count = len(font_data.get("googleFontLinks", []))
         font_face_count = len(font_data.get("fontFaceRules", []))
         _log(f"Fonts: {google_font_count} Google Font links, {font_face_count} @font-face rules")
 
         # Extract image URLs
-        image_urls: list[dict] = await page.evaluate(_JS_EXTRACT_IMAGES, MAX_IMAGE_URLS)
+        image_urls: list[dict] = await _safe_evaluate(page, _JS_EXTRACT_IMAGES, arg=MAX_IMAGE_URLS, default=[])
         _log(f"Found {len(image_urls)} image URLs")
 
         # Take screenshots
         _log("Capturing screenshots...")
-        total_height = await page.evaluate("document.body.scrollHeight")
+        total_height = await _safe_evaluate(page, "document.body.scrollHeight", default=VIEWPORT_HEIGHT)
         screenshots: list[str] = []
         scroll_positions: list[int] = []
         scroll_offset = 0
         while scroll_offset < total_height and len(screenshots) < MAX_SCREENSHOTS:
-            await page.evaluate(f"window.scrollTo(0, {scroll_offset})")
-            await page.wait_for_timeout(600)
-            shot = await page.screenshot(full_page=False)
-            screenshots.append(base64.b64encode(shot).decode("utf-8"))
-            scroll_positions.append(scroll_offset)
+            try:
+                await asyncio.wait_for(page.evaluate(f"window.scrollTo(0, {scroll_offset})"), timeout=5)
+                await page.wait_for_timeout(600)
+                shot = await asyncio.wait_for(page.screenshot(full_page=False), timeout=10)
+                screenshots.append(base64.b64encode(shot).decode("utf-8"))
+                scroll_positions.append(scroll_offset)
+            except (asyncio.TimeoutError, Exception) as e:
+                _log(f"Screenshot at offset {scroll_offset} failed, stopping")
+                break
             scroll_offset += VIEWPORT_HEIGHT
 
         await browser.close()

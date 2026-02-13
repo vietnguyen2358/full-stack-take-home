@@ -26,9 +26,13 @@ from app.services.deployer import (
     start_preview,
     capture_static_html,
     _create_sandbox,
+    _sandbox_exec,
     TEMPLATE_DIR,
     TEMPLATE_FILES,
     MAX_BUILD_ATTEMPTS,
+    EXEC_TIMEOUT_MKDIR,
+    EXEC_TIMEOUT_INSTALL,
+    EXEC_TIMEOUT_BUILD,
 )
 
 logger = logging.getLogger(__name__)
@@ -225,13 +229,6 @@ async def clone_website(req: CloneRequest):
                 generated_files[path] = f["content"]
             extra_deps = result.get("deps", [])
 
-            # Find page.tsx content — try exact key, then any page.tsx variant
-            generated_code = generated_files.get("src/app/page.tsx", "")
-            if not generated_code:
-                for k, v in generated_files.items():
-                    if k.endswith("page.tsx"):
-                        generated_code = v
-                        break
             yield _log(f"AI generated {len(generated_files)} file(s): {', '.join(generated_files.keys())}")
             if extra_deps:
                 yield _log(f"AI requested extra packages: {', '.join(extra_deps)}")
@@ -242,7 +239,7 @@ async def clone_website(req: CloneRequest):
 
             gen_elapsed = time.time() - gen_start
             logger.info("[generate] COMPLETE in %.1fs", gen_elapsed)
-            _db_update_clone(clone_id, status="deploying", generated_code=generated_code)
+            _db_update_clone(clone_id, status="deploying", generated_files_json=json.dumps(generated_files))
 
             # ── DEPLOYING ─────────────────────────────────────────
             deploy_start = time.time()
@@ -320,8 +317,6 @@ async def clone_website(req: CloneRequest):
             except (asyncio.CancelledError, asyncio.InvalidStateError):
                 pass
 
-            generated_code = generated_files.get("src/app/page.tsx", "")
-
             # ── DONE ──────────────────────────────────────────────
             project_files: dict[str, str] = {}
             for rel_path in TEMPLATE_FILES:
@@ -332,13 +327,14 @@ async def clone_website(req: CloneRequest):
             for gen_path, gen_content in generated_files.items():
                 project_files[gen_path] = gen_content
 
+            generated_code = generated_files.get("src/app/page.tsx", "")
             total_elapsed = time.time() - request_start
             logger.info(
-                "=== CLONE REQUEST COMPLETE === url=%s total=%.1fs code=%d chars preview=%s",
-                url_str, total_elapsed, len(generated_code), preview_url or "none",
+                "=== CLONE REQUEST COMPLETE === url=%s total=%.1fs files=%d preview=%s",
+                url_str, total_elapsed, len(generated_files), preview_url or "none",
             )
 
-            db_fields = dict(status="done", preview_url=preview_url, generated_code=generated_code, completed_at=datetime.now(timezone.utc).isoformat())
+            db_fields = dict(status="done", preview_url=preview_url, generated_files_json=json.dumps(generated_files), completed_at=datetime.now(timezone.utc).isoformat())
             if static_html:
                 db_fields["static_html"] = static_html
             _db_update_clone(clone_id, **db_fields)
@@ -395,15 +391,19 @@ async def get_clone(clone_id: str):
     try:
         result = sb.table("clones").select("*").eq("id", clone_id).single().execute()
         data = result.data
-        # Reconstruct the full file tree from templates + stored generated code
+        # Reconstruct the full file tree from templates + stored generated files
         files: dict[str, str] = {}
         for rel_path in TEMPLATE_FILES:
             try:
                 files[rel_path] = (TEMPLATE_DIR / rel_path).read_text()
             except Exception:
                 pass
-        if data.get("generated_code"):
-            files["src/app/page.tsx"] = data["generated_code"]
+        if data.get("generated_files_json"):
+            try:
+                gen_files = json.loads(data["generated_files_json"])
+                files.update(gen_files)
+            except (json.JSONDecodeError, TypeError):
+                pass
         data["files"] = files
         return data
     except Exception as e:
@@ -434,15 +434,20 @@ async def redeploy_clone(clone_id: str):
         raise HTTPException(status_code=503, detail="Database not configured")
 
     try:
-        result = sb.table("clones").select("url, generated_code").eq("id", clone_id).single().execute()
+        result = sb.table("clones").select("*").eq("id", clone_id).single().execute()
         data = result.data
     except Exception as e:
         raise HTTPException(status_code=404, detail="Clone not found")
 
-    if not data.get("generated_code"):
+    # Restore all generated files
+    generated_files: dict[str, str] = {}
+    if data.get("generated_files_json"):
+        try:
+            generated_files = json.loads(data["generated_files_json"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if not generated_files:
         raise HTTPException(status_code=400, detail="No generated code to deploy")
-
-    generated_code = data["generated_code"]
 
     async def stream():
         try:
@@ -458,65 +463,68 @@ async def redeploy_clone(clone_id: str):
                 return
 
             logger.info("[redeploy] Sandbox created in %.1fs for clone %s", time.time() - sandbox_start, clone_id)
-            yield _log("Sandbox created successfully")
+            yield _log(f"Sandbox created in {time.time() - sandbox_start:.1f}s")
             project_dir = "/home/daytona/app"
 
-            # Upload files
-            yield _status("deploying", "Uploading project files...")
-            await asyncio.to_thread(
-                sandbox.process.exec,
-                f"mkdir -p {project_dir}/src/app/[...slug] {project_dir}/src/lib"
-            )
+            # Create directories
+            all_dirs = {"src/app/[...slug]", "src/lib"}
+            for gen_path in generated_files:
+                parent = str(Path(gen_path).parent)
+                if parent and parent != ".":
+                    all_dirs.add(parent)
+            mkdir_cmd = " ".join(f"{project_dir}/{d}" for d in sorted(all_dirs))
+            await _sandbox_exec(sandbox, f"mkdir -p {mkdir_cmd}", EXEC_TIMEOUT_MKDIR)
 
+            # Upload template + generated files in parallel
             upload_start = time.time()
+            upload_tasks = []
             for rel_path in TEMPLATE_FILES:
                 file_path = TEMPLATE_DIR / rel_path
-                await asyncio.to_thread(
+                upload_tasks.append(asyncio.to_thread(
                     sandbox.fs.upload_file,
                     file_path.read_bytes(),
                     f"{project_dir}/{rel_path}",
-                )
+                ))
+            for gen_path, gen_content in generated_files.items():
+                upload_tasks.append(asyncio.to_thread(
+                    sandbox.fs.upload_file,
+                    gen_content.encode("utf-8"),
+                    f"{project_dir}/{gen_path}",
+                ))
+            await asyncio.gather(*upload_tasks)
 
-            await asyncio.to_thread(
-                sandbox.fs.upload_file,
-                generated_code.encode("utf-8"),
-                f"{project_dir}/src/app/page.tsx",
-            )
-            logger.info("[redeploy] Uploaded files in %.1fs", time.time() - upload_start)
-            yield _log("Files uploaded")
+            total_files = len(TEMPLATE_FILES) + len(generated_files)
+            logger.info("[redeploy] Uploaded %d files in %.1fs", total_files, time.time() - upload_start)
+            yield _log(f"Uploaded {total_files} files in {time.time() - upload_start:.1f}s")
 
-            # npm install
-            yield _status("deploying", "Installing dependencies...")
+            # Install dependencies
             yield _log("Installing dependencies...")
             npm_start = time.time()
-            await asyncio.to_thread(
-                sandbox.process.exec,
-                f"cd {project_dir} && npm install",
-            )
-            logger.info("[redeploy] npm install completed in %.1fs", time.time() - npm_start)
+            try:
+                await _sandbox_exec(sandbox, f"cd {project_dir} && npm install", EXEC_TIMEOUT_INSTALL)
+            except asyncio.TimeoutError:
+                yield _log(f"npm install timed out after {EXEC_TIMEOUT_INSTALL}s — continuing")
             yield _log(f"Dependencies installed in {time.time() - npm_start:.1f}s")
 
             # Build
-            yield _status("deploying", "Building project...")
             yield _log("Running next build...")
             build_start = time.time()
-            build_result = await asyncio.to_thread(
-                sandbox.process.exec,
-                f"cd {project_dir} && npx next build 2>&1",
-            )
-            logger.info("[redeploy] Build finished in %.1fs (exit %d)", time.time() - build_start, build_result.exit_code)
-            if build_result.exit_code != 0:
-                yield _log("Build had errors — starting dev server anyway")
+            try:
+                build_result = await _sandbox_exec(
+                    sandbox, f"cd {project_dir} && npx next build 2>&1", EXEC_TIMEOUT_BUILD
+                )
+                if build_result.exit_code != 0:
+                    yield _log("Build had errors — starting dev server anyway")
+            except asyncio.TimeoutError:
+                yield _log(f"Build timed out after {EXEC_TIMEOUT_BUILD}s — starting dev server anyway")
+            yield _log(f"Build finished in {time.time() - build_start:.1f}s")
 
             # Start dev server
-            yield _status("deploying", "Starting Next.js server...")
-            yield _log("Starting next dev on port 8080...")
+            yield _log("Starting Next.js server...")
             preview_url = await start_preview(sandbox, project_dir)
             yield _log(f"Preview ready: {preview_url}")
 
-            # Update the stored preview URL
             _db_update_clone(clone_id, preview_url=preview_url)
-
             yield _sse_event({"status": "done", "preview_url": preview_url})
 
         except Exception as e:

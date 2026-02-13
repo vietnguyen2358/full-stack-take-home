@@ -1055,7 +1055,7 @@ async def _run_section_agent(
             response = await client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": content}],
-                max_tokens=16000,
+                max_tokens=32000,
                 temperature=0,
             )
             break

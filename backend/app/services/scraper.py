@@ -15,6 +15,8 @@ VIEWPORT_HEIGHT = 900
 MAX_SCREENSHOTS = 15
 MAX_IMAGE_URLS = 100
 MAX_STRUCTURED_ELEMENTS = 300
+MAX_SCROLL_HEIGHT = 15000  # Stop scrolling after this many pixels
+MAX_SCROLL_TIME = 12  # Stop scrolling after this many seconds
 
 
 def _clean_html(html: str) -> str:
@@ -597,8 +599,8 @@ _JS_EXTRACT_IMAGES = """(maxUrls) => {
             try { const abs = new URL(u, location.href).href; add(abs, {}); } catch(e) {}
         });
     });
-    // background-image URLs
-    document.querySelectorAll('*').forEach(el => {
+    // background-image URLs (scan key containers only, not every DOM node)
+    document.querySelectorAll('section, article, div[class*="hero"], div[class*="banner"], div[class*="bg"], div[class*="background"], div[class*="cover"], header, footer, [style*="background"]').forEach(el => {
         const bg = getComputedStyle(el).backgroundImage;
         const match = bg.match(/url\\(["']?([^"')]+)["']?\\)/);
         if (match && match[1]) {
@@ -662,44 +664,69 @@ async def scrape_page(
         nav_start = time.time()
         _log("Navigating to page...")
 
-        # Strategy: use "commit" (waits only for server response headers) so we
-        # never fail on slow SSR pages.  Then separately wait for content.
         try:
-            await page.goto(url, wait_until="commit", timeout=30000)
-        except Exception:
-            # Even commit failed — server may be completely unresponsive.
-            # Check if the page got *any* content anyway (redirects, partial load).
-            pass
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        except Exception as e:
+            _log(f"Navigation timeout ({e.__class__.__name__}), continuing with partial page...")
 
-        # Now wait for meaningful content to appear, handling both SSR and CSR:
-        # 1. domcontentloaded — HTML fully parsed (SSR pages are done here)
-        # 2. Visible content selector — catches CSR/SPA pages that render via JS
-        loaded = False
-        try:
-            await page.wait_for_load_state("domcontentloaded", timeout=15000)
-            loaded = True
-        except Exception:
-            _log("DOM still loading, waiting for visible content...")
-
-        if not loaded:
-            # CSR/SPA fallback: wait for any visible content in <body>
-            try:
-                await page.wait_for_selector("body > *", state="visible", timeout=15000)
-            except Exception:
-                pass
-
-        # Brief extra settle time for late hydration / async renders
+        # Brief settle time for JS hydration / async renders
         await page.wait_for_timeout(2000)
         _log(f"Page loaded in {time.time() - nav_start:.1f}s")
 
-        # Scroll to bottom to trigger all lazy-loaded content
+        # Dismiss cookie consent / overlay banners
+        _log("Dismissing overlays...")
+        try:
+            dismissed = await page.evaluate("""() => {
+                const selectors = [
+                    // Cookie consent buttons
+                    'button[id*="accept"]', 'button[class*="accept"]',
+                    'button[id*="consent"]', 'button[class*="consent"]',
+                    'button[id*="agree"]', 'button[class*="agree"]',
+                    '[data-testid*="accept"]', '[data-testid*="consent"]',
+                    // Common cookie banner button text patterns
+                    'button[aria-label*="Accept"]', 'button[aria-label*="accept"]',
+                    'button[aria-label*="Allow"]', 'button[aria-label*="allow"]',
+                    // "Reject all" / "No thanks" / close buttons on overlays
+                    '[class*="cookie"] button', '[id*="cookie"] button',
+                    '[class*="banner"] button:first-of-type',
+                    // YouTube specific consent
+                    'button[aria-label*="Accept the use"]',
+                    'tp-yt-paper-button[aria-label*="Agree"]',
+                    'button.VfPpkd-LgbsSe[style*="background"]',
+                    // Amazon specific
+                    '#sp-cc-accept', 'input[name="accept"]',
+                ];
+                let count = 0;
+                for (const sel of selectors) {
+                    const el = document.querySelector(sel);
+                    if (el && el.offsetParent !== null) {
+                        el.click();
+                        count++;
+                    }
+                }
+                return count;
+            }""")
+            if dismissed:
+                await page.wait_for_timeout(1000)
+                _log(f"Dismissed {dismissed} overlay(s)")
+        except Exception:
+            pass
+
+        # Scroll to bottom to trigger lazy-loaded content
+        # Capped by height and time to handle infinite-scroll sites (YouTube, etc.)
         _log("Scrolling to trigger lazy-loaded content...")
         scroll_start = time.time()
         scroll_count = 0
         prev_height = 0
         for _ in range(30):
+            if time.time() - scroll_start > MAX_SCROLL_TIME:
+                _log("Scroll time limit reached")
+                break
             total_height = await page.evaluate("document.body.scrollHeight")
             if total_height == prev_height:
+                break
+            if total_height > MAX_SCROLL_HEIGHT:
+                _log(f"Scroll height limit reached ({total_height:,}px)")
                 break
             prev_height = total_height
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -708,7 +735,8 @@ async def scrape_page(
         # Scroll back to top
         await page.evaluate("window.scrollTo(0, 0)")
         await page.wait_for_timeout(500)
-        _log(f"Scrolled {scroll_count}x in {time.time() - scroll_start:.1f}s — page height: {prev_height}px")
+        final_height = await page.evaluate("document.body.scrollHeight")
+        _log(f"Scrolled {scroll_count}x in {time.time() - scroll_start:.1f}s — page height: {final_height:,}px")
 
         # Capture HTML after all content is loaded
         _log("Extracting HTML...")

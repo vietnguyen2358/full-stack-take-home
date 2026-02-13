@@ -79,10 +79,12 @@ def _cleanup_old_sandboxes(daytona):
 
 
 def _create_sandbox():
-    """Create and return a Daytona sandbox, or None if not configured."""
+    """Clean up old sandboxes, then create and return a new one."""
     daytona = _get_daytona_client()
     if daytona is None:
         return None
+
+    _cleanup_old_sandboxes(daytona)
 
     params = CreateSandboxFromImageParams(
         image="node:20",

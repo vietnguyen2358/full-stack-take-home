@@ -404,6 +404,8 @@ async def get_clone(clone_id: str):
                 files.update(gen_files)
             except (json.JSONDecodeError, TypeError):
                 pass
+        elif data.get("generated_code"):
+            files["src/app/page.tsx"] = data["generated_code"]
         data["files"] = files
         return data
     except Exception as e:
@@ -439,13 +441,15 @@ async def redeploy_clone(clone_id: str):
     except Exception as e:
         raise HTTPException(status_code=404, detail="Clone not found")
 
-    # Restore all generated files
+    # Restore all generated files (try generated_files_json first, fall back to generated_code)
     generated_files: dict[str, str] = {}
     if data.get("generated_files_json"):
         try:
             generated_files = json.loads(data["generated_files_json"])
         except (json.JSONDecodeError, TypeError):
             pass
+    if not generated_files and data.get("generated_code"):
+        generated_files = {"src/app/page.tsx": data["generated_code"]}
     if not generated_files:
         raise HTTPException(status_code=400, detail="No generated code to deploy")
 

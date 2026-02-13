@@ -687,66 +687,58 @@ async def scrape_page(
 
         # Dismiss cookie consent / overlay banners
         _log("Dismissing overlays...")
-        try:
-            dismissed = await page.evaluate("""() => {
-                const selectors = [
-                    // Cookie consent buttons
-                    'button[id*="accept"]', 'button[class*="accept"]',
-                    'button[id*="consent"]', 'button[class*="consent"]',
-                    'button[id*="agree"]', 'button[class*="agree"]',
-                    '[data-testid*="accept"]', '[data-testid*="consent"]',
-                    // Common cookie banner button text patterns
-                    'button[aria-label*="Accept"]', 'button[aria-label*="accept"]',
-                    'button[aria-label*="Allow"]', 'button[aria-label*="allow"]',
-                    // "Reject all" / "No thanks" / close buttons on overlays
-                    '[class*="cookie"] button', '[id*="cookie"] button',
-                    '[class*="banner"] button:first-of-type',
-                    // YouTube specific consent
-                    'button[aria-label*="Accept the use"]',
-                    'tp-yt-paper-button[aria-label*="Agree"]',
-                    'button.VfPpkd-LgbsSe[style*="background"]',
-                    // Amazon specific
-                    '#sp-cc-accept', 'input[name="accept"]',
-                ];
-                let count = 0;
-                for (const sel of selectors) {
-                    const el = document.querySelector(sel);
-                    if (el && el.offsetParent !== null) {
-                        el.click();
-                        count++;
-                    }
-                }
-                return count;
-            }""")
-            if dismissed:
-                await page.wait_for_timeout(1000)
-                _log(f"Dismissed {dismissed} overlay(s)")
-        except Exception:
-            pass
+        dismissed = await _safe_evaluate(page, """() => {
+            const selectors = [
+                'button[id*="accept"]', 'button[class*="accept"]',
+                'button[id*="consent"]', 'button[class*="consent"]',
+                'button[id*="agree"]', 'button[class*="agree"]',
+                '[data-testid*="accept"]', '[data-testid*="consent"]',
+                'button[aria-label*="Accept"]', 'button[aria-label*="accept"]',
+                'button[aria-label*="Allow"]', 'button[aria-label*="allow"]',
+                '[class*="cookie"] button', '[id*="cookie"] button',
+                '[class*="banner"] button:first-of-type',
+                'button[aria-label*="Accept the use"]',
+                'tp-yt-paper-button[aria-label*="Agree"]',
+                'button.VfPpkd-LgbsSe[style*="background"]',
+                '#sp-cc-accept', 'input[name="accept"]',
+            ];
+            let count = 0;
+            for (const sel of selectors) {
+                const el = document.querySelector(sel);
+                if (el && el.offsetParent !== null) { el.click(); count++; }
+            }
+            return count;
+        }""", default=0)
+        if dismissed:
+            await page.wait_for_timeout(1000)
+            _log(f"Dismissed {dismissed} overlay(s)")
 
         # Scroll to bottom to trigger lazy-loaded content
-        # Capped by height and time to handle infinite-scroll sites (YouTube, etc.)
         _log("Scrolling to trigger lazy-loaded content...")
         scroll_start = time.time()
         scroll_count = 0
         prev_height = 0
         for _ in range(30):
-            total_height = await page.evaluate("document.body.scrollHeight")
-            if total_height == prev_height:
+            total_height = await _safe_evaluate(page, "document.body.scrollHeight", default=0, timeout=5)
+            if total_height == 0 or total_height == prev_height:
                 break
             prev_height = total_height
-            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            await _safe_evaluate(page, "window.scrollTo(0, document.body.scrollHeight)", default=None, timeout=5)
             await page.wait_for_timeout(800)
             scroll_count += 1
         # Scroll back to top
-        await page.evaluate("window.scrollTo(0, 0)")
+        await _safe_evaluate(page, "window.scrollTo(0, 0)", default=None, timeout=5)
         await page.wait_for_timeout(500)
-        final_height = await page.evaluate("document.body.scrollHeight")
+        final_height = await _safe_evaluate(page, "document.body.scrollHeight", default=prev_height, timeout=5)
         _log(f"Scrolled {scroll_count}x in {time.time() - scroll_start:.1f}s — page height: {final_height:,}px")
 
         # Capture HTML after all content is loaded
         _log("Extracting HTML...")
-        raw_html = await page.content()
+        try:
+            raw_html = await asyncio.wait_for(page.content(), timeout=STEP_TIMEOUT)
+        except asyncio.TimeoutError:
+            _log("HTML extraction timed out, using empty HTML")
+            raw_html = ""
 
         # Clean HTML
         clean_start = time.time()

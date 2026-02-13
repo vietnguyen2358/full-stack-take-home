@@ -1,29 +1,32 @@
-# Full Stack Starter Template
+# AQ Clone
 
-A clean monorepo structure for projects using **Next.js** (frontend) and **FastAPI** (backend).
+A website cloning tool that takes a URL, scrapes the page, and uses AI to generate a replica with live preview.
 
-## Getting Started
+**[Live Site](https://aq-clone-app.vercel.app/)** | **[Demo Video](https://youtu.be/DOw1UEBIEGs)**
 
-### Clone
+## Stack
+
+- **Frontend**: Next.js, TypeScript, Tailwind CSS
+- **Backend**: FastAPI, Playwright, OpenRouter
+- **Sandbox**: Daytona
+- **Database**: Supabase
+- **Deployment**: Vercel + Railway
+
+## Running Locally
+
 ```bash
-git clone https://github.com/YOUR_USERNAME/fullstack-template.git
-cd fullstack-template
-```
+# Backend
+cd backend
+source venv/bin/activate
+pip install -r requirements.txt
+python -m app.main
+# → http://localhost:8000
 
-### Frontend
-```bash
+# Frontend
 cd frontend
 npm install
 npm run dev
+# → http://localhost:3000
 ```
 
-### Backend
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
-
-Visit:
-- Frontend → http://localhost:3000  
-- Backend → http://localhost:8000
+Requires `OPENROUTER_API_KEY`, `DAYTONA_API_KEY`, and `SUPABASE_URL`/`SUPABASE_KEY` in `backend/.env`.

@@ -15,8 +15,6 @@ VIEWPORT_HEIGHT = 900
 MAX_SCREENSHOTS = 15
 MAX_IMAGE_URLS = 100
 MAX_STRUCTURED_ELEMENTS = 300
-MAX_SCROLL_HEIGHT = 15000  # Stop scrolling after this many pixels
-MAX_SCROLL_TIME = 12  # Stop scrolling after this many seconds
 
 
 def _clean_html(html: str) -> str:
@@ -719,14 +717,8 @@ async def scrape_page(
         scroll_count = 0
         prev_height = 0
         for _ in range(30):
-            if time.time() - scroll_start > MAX_SCROLL_TIME:
-                _log("Scroll time limit reached")
-                break
             total_height = await page.evaluate("document.body.scrollHeight")
             if total_height == prev_height:
-                break
-            if total_height > MAX_SCROLL_HEIGHT:
-                _log(f"Scroll height limit reached ({total_height:,}px)")
                 break
             prev_height = total_height
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")

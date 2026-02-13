@@ -799,8 +799,12 @@ def _determine_agent_count(num_screenshots: int) -> int:
         return 1
     elif num_screenshots <= 3:
         return 2
+    elif num_screenshots <= 6:
+        return 3
+    elif num_screenshots <= 10:
+        return 4
     else:
-        return min(3, MAX_PARALLEL_AGENTS)
+        return MAX_PARALLEL_AGENTS
 
 
 def _assign_screenshots_to_agents(

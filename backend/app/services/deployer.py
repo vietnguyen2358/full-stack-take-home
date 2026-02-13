@@ -127,7 +127,7 @@ async def deploy_to_sandbox(
         parent = str(Path(gen_path).parent)
         if parent and parent != ".":
             all_dirs.add(parent)
-    mkdir_cmd = " ".join(f"{project_dir}/{d}" for d in sorted(all_dirs))
+    mkdir_cmd = " ".join(f"'{project_dir}/{d}'" for d in sorted(all_dirs))
     await _sandbox_exec(sandbox, f"mkdir -p {mkdir_cmd}", EXEC_TIMEOUT_MKDIR)
 
     # Upload all files in parallel

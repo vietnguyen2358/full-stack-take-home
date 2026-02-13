@@ -6,6 +6,7 @@ import time
 from typing import Any, Callable
 
 from playwright.async_api import async_playwright
+from playwright_stealth import stealth_async
 
 logger = logging.getLogger(__name__)
 
@@ -656,6 +657,7 @@ async def scrape_page(
                 "Chrome/131.0.0.0 Safari/537.36"
             ),
         )
+        await stealth_async(page)
 
         nav_start = time.time()
         _log("Navigating to page...")

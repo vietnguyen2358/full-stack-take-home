@@ -1387,11 +1387,15 @@ async def fix_build_errors(
     # Try to identify which file has the error
     failing_file = None
     for line in error_text.splitlines():
-        # Match patterns like ./src/components/AIFirst.tsx or src/app/page.tsx
-        m = re.search(r'[./]*((?:src/|app/|components/)[\w/.-]+\.tsx)', line)
+        # Match patterns like ./src/components/AIFirst.tsx, src/app/page.tsx, or bare filenames
+        m = re.search(r'[./]*((?:src/|app/|components/)[\w/.-]+\.tsx?)', line)
         if m:
             failing_file = m.group(1)
-            # Normalize: remove leading src/ for matching against generated_files keys
+            break
+        # Also match error references like "in AIFirst (at page.tsx:12)"
+        m = re.search(r'[\w/.-]+\.tsx?', line)
+        if m and ('error' in line.lower() or 'type' in line.lower() or 'module' in line.lower()):
+            failing_file = m.group(0)
             break
 
     if failing_file:
@@ -1401,6 +1405,13 @@ async def fix_build_errors(
             if key == failing_file or key.endswith(failing_file) or failing_file.endswith(key):
                 matched_key = key
                 break
+        # Also try matching just the filename
+        if not matched_key:
+            basename = failing_file.split("/")[-1]
+            for key in generated_files:
+                if key.endswith(basename):
+                    matched_key = key
+                    break
 
         if matched_key:
             logger.info(f"[ai-fix] Identified failing file: {matched_key}")
@@ -1409,7 +1420,20 @@ async def fix_build_errors(
             fixed_files[matched_key] = result["content"]
             return fixed_files, []
 
-    # Can't identify the failing file — return files unchanged rather than
-    # rewriting everything (which destroys styling/content).
+    # Can't identify the specific file — try fixing page.tsx as it imports everything
+    page_key = None
+    for key in generated_files:
+        if key.endswith("page.tsx"):
+            page_key = key
+            break
+
+    if page_key:
+        logger.info("[ai-fix] Could not identify failing file, attempting fix on %s", page_key)
+        result = await fix_component(page_key, generated_files[page_key], error_text)
+        fixed_files = dict(generated_files)
+        fixed_files[page_key] = result["content"]
+        return fixed_files, []
+
+    # No page.tsx found — return files unchanged to preserve content.
     logger.warning("[ai-fix] Could not identify failing file, skipping fix to preserve content")
     return generated_files, []

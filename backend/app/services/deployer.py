@@ -418,7 +418,7 @@ async def start_preview(
         if on_log:
             await on_log(f"Dev server started ({elapsed:.1f}s)")
 
-    preview = sandbox.create_signed_preview_url(8080)
+    preview = sandbox.create_signed_preview_url(8080, expires_in_seconds=1200)
     preview_url = preview.url
     logger.info("[deploy] Preview ready: %s", preview_url)
     return preview_url

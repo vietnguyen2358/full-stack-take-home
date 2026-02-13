@@ -866,45 +866,14 @@ export default function Home() {
                         setTab("preview");
                         setPhase("done");
 
-                        // Use static HTML if available (instant), otherwise redeploy
+                        // Use static HTML for history items, or show redeploy option
+                        setPreviewUrl("");
                         if (data.static_html) {
                           setStaticHtml(data.static_html);
-                          setPreviewUrl("");
+                          setTab("preview");
                         } else {
                           setStaticHtml("");
-                          setPreviewUrl("");
-                          setRedeploying(true);
-                          setRedeployLogs([]);
-                          fetch(`${process.env.NEXT_PUBLIC_API_URL}/clones/${data.id}/redeploy`, { method: "POST" })
-                            .then(async (res) => {
-                              if (!res.ok) throw new Error(`Request failed (${res.status})`);
-                              const reader = res.body?.getReader();
-                              if (!reader) throw new Error("No response body");
-                              const decoder = new TextDecoder();
-                              let buf = "";
-                              while (true) {
-                                const { done, value } = await reader.read();
-                                if (done) break;
-                                buf += decoder.decode(value, { stream: true });
-                                const lines = buf.split("\n");
-                                buf = lines.pop() || "";
-                                for (const line of lines) {
-                                  if (!line.startsWith("data: ")) continue;
-                                  const payload = JSON.parse(line.slice(6));
-                                  if (payload.log) setRedeployLogs((prev) => [...prev, payload.log]);
-                                  if (payload.status === "done" && payload.preview_url) {
-                                    setPreviewUrl(payload.preview_url);
-                                  }
-                                  if (payload.status === "error") {
-                                    setRedeployLogs((prev) => [...prev, `Error: ${payload.message}`]);
-                                  }
-                                }
-                              }
-                            })
-                            .catch((err: unknown) => {
-                              setRedeployLogs((prev) => [...prev, `Error: ${err instanceof Error ? err.message : "Failed"}`]);
-                            })
-                            .finally(() => setRedeploying(false));
+                          setTab("preview"); // will show redeploy button
                         }
                       })
                       .catch(() => {});

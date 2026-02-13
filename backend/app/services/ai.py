@@ -422,9 +422,12 @@ def _common_rules_block(ctx: dict) -> str:
         "- **Text**: copy ALL text VERBATIM from the HTML skeleton. Never paraphrase or use placeholders.\n"
         "- **Colors**: use exact hex values from extracted styles. Match backgrounds, text colors, gradients.\n"
         "- **Layout**: count columns exactly. Side-by-side elements must be side-by-side, not stacked.\n"
+        "  Full-width sections (hero banners, navbars, footers) MUST span 100% width with no side margins.\n"
+        "  Use w-full on outer wrappers. Only constrain inner content with max-w-7xl mx-auto, not the background.\n"
         "- **Spacing**: match padding, margins, gaps from screenshots.\n"
         "- **Typography**: match font sizes, weights, and line heights.\n"
         "- **Images**: use <img> tags (NOT next/image) with original URLs.\n"
+        "  Hero/banner images must be full-width: use w-full and object-cover.\n"
         f"\n### Image URLs with context:\n{ctx['image_list']}\n\n"
         "- **Logos**: ALWAYS use <img> with original URL or copy exact SVG markup. NEVER recreate logos with CSS/text.\n"
         "- **Fonts**: if Google Fonts detected, load via useEffect appending <link> to document.head.\n"
@@ -544,7 +547,11 @@ def build_section_prompt(
 
     if is_first:
         role = "You handle the TOP of the page. Generate the navigation bar, header, and hero/intro section."
-        boundary_rules = "- You OWN the header/navigation - include it in your output.\n"
+        boundary_rules = (
+            "- You OWN the header/navigation - include it in your output.\n"
+            "- The Navbar MUST be pixel-accurate: match exact logo, links, colors, and layout from the screenshot.\n"
+            "- Navbar must span full width (w-full) with inner content constrained by max-w container.\n"
+        )
         if not is_last:
             boundary_rules += "- Do NOT generate a footer - another agent handles the bottom.\n"
     elif is_last:

@@ -23,7 +23,7 @@ TEMPLATE_FILES = [
     "src/lib/utils.ts",
     "src/app/layout.tsx",
     "src/app/globals.css",
-    "src/app/[...slug]/page.tsx",
+    "src/app/not-found.tsx",
 ]
 
 MAX_BUILD_ATTEMPTS = 3
@@ -122,7 +122,7 @@ async def deploy_to_sandbox(
         logger.info("[deploy] Using pre-created sandbox")
 
     # Create all directories needed
-    all_dirs = {"src/app/[...slug]", "src/lib"}
+    all_dirs = {"src/lib"}
     for gen_path in generated_files:
         parent = str(Path(gen_path).parent)
         if parent and parent != ".":
